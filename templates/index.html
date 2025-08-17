@@ -5,657 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Video Frame Editor</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #1a1a1a;
-            color: #e0e0e0;
-        }
-
-        .container {
-            width: 95%;
-            margin: 0;
-            background: #2d2d2d;
-            border-radius: 0;
-            padding: 20px;
-            box-shadow: none;
-        }
-
-        .video-selector {
-            margin-bottom: 20px;
-        }
-
-        .current-frame {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .frame-display {
-            position: relative;
-            display: inline-block;
-            border: 2px solid #555;
-            margin-bottom: 10px;
-            resize: both;
-            overflow: auto;
-            min-width: 300px;
-            min-height: 200px;
-            max-width: 90vw;
-            max-height: 80vh;
-        }
-
-        .frame-image {
-            width: 100%;
-            height: 100%;
-            display: block;
-            object-fit: contain;
-        }
-
-        .rectangle {
-            position: absolute;
-            border: 2px solid #ff6b6b;
-            background: rgba(255, 107, 107, 0.2);
-            cursor: move;
-            min-width: 20px;
-            min-height: 20px;
-        }
-
-        .rectangle.selected {
-            border-color: #ffd700;
-            box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
-        }
-
-        .rectangle.previous-frame {
-            border-color: #4a90e2;
-            background: rgba(74, 144, 226, 0.15);
-            border-style: dashed;
-            opacity: 0.7;
-        }
-
-        .rectangle.previous-frame.selected {
-            border-color: #ffd700;
-            box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
-            opacity: 1;
-        }
-
-        .rectangle.inherited-rectangle {
-            border-color: #28a745;
-            background: rgba(40, 167, 69, 0.15);
-            border-style: solid;
-            opacity: 0.8;
-        }
-
-        .rectangle.inherited-rectangle.selected {
-            border-color: #ffd700;
-            box-shadow: 0 0 8px rgba(255, 215, 0, 0.5);
-            opacity: 1;
-        }
-
-        .rectangle.deleted-rectangle {
-            border-color: #666;
-            background: rgba(102, 102, 102, 0.1);
-            border-style: dashed;
-            opacity: 0.4;
-        }
-
-        .rectangle.deleted-rectangle.selected {
-            border-color: #ffd700;
-            box-shadow: 0 0 8px rgba(255, 215, 0, 0.3);
-            opacity: 0.7;
-        }
-
-        .resize-handle {
-            position: absolute;
-            background: #ffd700;
-            border: 1px solid #ffcc00;
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .resize-handle.nw {
-            top: -4px;
-            left: -4px;
-            cursor: nw-resize;
-        }
-
-        .resize-handle.ne {
-            top: -4px;
-            right: -4px;
-            cursor: ne-resize;
-        }
-
-        .resize-handle.sw {
-            bottom: -4px;
-            left: -4px;
-            cursor: sw-resize;
-        }
-
-        .resize-handle.se {
-            bottom: -4px;
-            right: -4px;
-            cursor: se-resize;
-        }
-
-        .resize-handle.n {
-            top: -4px;
-            left: 50%;
-            transform: translateX(-50%);
-            cursor: n-resize;
-        }
-
-        .resize-handle.s {
-            bottom: -4px;
-            left: 50%;
-            transform: translateX(-50%);
-            cursor: s-resize;
-        }
-
-        .resize-handle.w {
-            top: 50%;
-            left: -4px;
-            transform: translateY(-50%);
-            cursor: w-resize;
-        }
-
-        .resize-handle.e {
-            top: 50%;
-            right: -4px;
-            transform: translateY(-50%);
-            cursor: e-resize;
-        }
-
-        .rectangle-delete {
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            width: 16px;
-            height: 16px;
-            background: #ff4757;
-            border: 1px solid #ff3742;
-            border-radius: 50%;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-            z-index: 1000;
-            line-height: 1;
-        }
-
-        .rectangle:hover .rectangle-delete,
-        .rectangle.selected .rectangle-delete {
-            opacity: 1;
-        }
-
-        .rectangle-delete:hover {
-            background: #ff3742;
-            transform: scale(1.1);
-        }
-
-        .rectangle-delete.inherited {
-            background: #ffa726;
-            border-color: #ff9800;
-        }
-
-        .rectangle-delete.inherited:hover {
-            background: #ff9800;
-        }
-
-        .rectangle-undelete {
-            position: absolute;
-            top: -8px;
-            right: -8px;
-            width: 16px;
-            height: 16px;
-            background: #52b788;
-            border: 1px solid #40916c;
-            border-radius: 50%;
-            color: white;
-            font-size: 10px;
-            font-weight: bold;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            opacity: 0;
-            transition: opacity 0.2s ease;
-            z-index: 1000;
-            line-height: 1;
-        }
-
-        .rectangle.deleted-rectangle:hover .rectangle-undelete,
-        .rectangle.deleted-rectangle.selected .rectangle-undelete {
-            opacity: 1;
-        }
-
-        .rectangle-undelete:hover {
-            background: #40916c;
-            transform: scale(1.1);
-        }
-
-        .controls {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .controls button {
-            padding: 10px 20px;
-            margin: 0 5px;
-            background: #0d7377;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .controls button:hover {
-            background: #14a085;
-        }
-
-        .video-selector select {
-            background: #3d3d3d;
-            color: #e0e0e0;
-            border: 1px solid #555;
-            padding: 8px;
-            border-radius: 4px;
-        }
-
-        .video-selector label {
-            color: #e0e0e0;
-            margin-right: 10px;
-        }
-
-        .timeline {
-            background: #333;
-            padding: 20px;
-            border-radius: 8px;
-            overflow-x: auto;
-            white-space: nowrap;
-        }
-
-        .timeline h3 {
-            color: #e0e0e0;
-            margin-top: 0;
-        }
-
-        .timeline-frames {
-            display: inline-flex;
-            gap: 5px;
-        }
-
-        .timeline-frame {
-            border: 2px solid transparent;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: border-color 0.2s;
-        }
-
-        .timeline-frame:hover {
-            border-color: #14a085;
-        }
-
-        .timeline-frame.selected {
-            border-color: #ff6b6b;
-            border-width: 3px;
-        }
-
-        .timeline-frame img {
-            width: 100px;
-            height: 60px;
-            object-fit: cover;
-            display: block;
-        }
-        .timeline-frame .time-display {
-            background: rgba(0, 0, 0, 0.7);
-            color: #e0e0e0;
-            font-size: 10px;
-            padding: 2px 4px;
-            text-align: center;
-            border-radius: 0 0 4px 4px;
-            font-family: monospace;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #666;
-        }
-
-        /* Toast Notifications */
-        .toast-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 10000;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            max-width: 400px;
-        }
-
-        .toast {
-            background: #2a2a2a;
-            border: 1px solid #555;
-            border-radius: 8px;
-            padding: 12px 16px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            opacity: 0;
-            transform: translateX(100%);
-            transition: all 0.3s ease-in-out;
-            color: #fff;
-            font-size: 14px;
-            line-height: 1.4;
-            word-wrap: break-word;
-        }
-
-        .toast.show {
-            opacity: 1;
-            transform: translateX(0);
-        }
-
-        .toast.success {
-            border-color: #52b788;
-            background: linear-gradient(135deg, #1b4332 0%, #2d5a3d 100%);
-        }
-
-        .toast.success .toast-icon {
-            color: #52b788;
-        }
-
-        .toast.error {
-            border-color: #ff6b6b;
-            background: linear-gradient(135deg, #5a1a1a 0%, #6b2a2a 100%);
-        }
-
-        .toast.error .toast-icon {
-            color: #ff6b6b;
-        }
-
-        .toast.warning {
-            border-color: #ffa726;
-            background: linear-gradient(135deg, #4a3a1a 0%, #5a4a2a 100%);
-        }
-
-        .toast.warning .toast-icon {
-            color: #ffa726;
-        }
-
-        .toast.info {
-            border-color: #42a5f5;
-            background: linear-gradient(135deg, #1a3a5a 0%, #2a4a6a 100%);
-        }
-
-        .toast.info .toast-icon {
-            color: #42a5f5;
-        }
-
-        .toast-icon {
-            font-size: 16px;
-            font-weight: bold;
-            flex-shrink: 0;
-        }
-
-        .toast-message {
-            flex: 1;
-        }
-
-        .toast-close {
-            color: #999;
-            cursor: pointer;
-            font-size: 18px;
-            line-height: 1;
-            padding: 0 4px;
-            border-radius: 3px;
-            transition: color 0.2s ease;
-            flex-shrink: 0;
-        }
-
-        .toast-close:hover {
-            color: #fff;
-        }
-
-        /* Legacy status element - keep hidden */
-        .status {
-            display: none !important;
-        }
-
-        /* Export Progress Modal */
-        .export-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            z-index: 20000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .export-modal-content {
-            background: #2a2a2a;
-            border: 1px solid #555;
-            border-radius: 12px;
-            padding: 24px;
-            max-width: 500px;
-            width: 90%;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
-            animation: modalSlideIn 0.3s ease-out;
-        }
-
-        @keyframes modalSlideIn {
-            from {
-                opacity: 0;
-                transform: translateY(-20px) scale(0.95);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0) scale(1);
-            }
-        }
-
-        .export-modal h3 {
-            color: #e0e0e0;
-            margin: 0 0 20px 0;
-            text-align: center;
-            font-size: 18px;
-        }
-
-        .export-progress {
-            margin-bottom: 20px;
-        }
-
-        .export-step {
-            display: flex;
-            align-items: center;
-            padding: 8px 0;
-            border-bottom: 1px solid #444;
-        }
-
-        .export-step:last-child {
-            border-bottom: none;
-        }
-
-        .step-icon {
-            width: 24px;
-            font-size: 14px;
-            margin-right: 12px;
-        }
-
-        .step-text {
-            flex: 1;
-            color: #e0e0e0;
-            font-size: 14px;
-        }
-
-        .step-status {
-            font-size: 12px;
-            padding: 2px 8px;
-            border-radius: 12px;
-            min-width: 60px;
-            text-align: center;
-        }
-
-        .export-step.pending .step-status {
-            background: #444;
-            color: #999;
-        }
-
-        .export-step.active .step-status {
-            background: #42a5f5;
-            color: white;
-        }
-
-        .export-step.active .step-icon {
-            color: #42a5f5;
-        }
-
-        .export-step.completed .step-status {
-            background: #52b788;
-            color: white;
-        }
-
-        .export-step.completed .step-icon {
-            color: #52b788;
-        }
-
-        .export-step.error .step-status {
-            background: #ff6b6b;
-            color: white;
-        }
-
-        .export-step.error .step-icon {
-            color: #ff6b6b;
-        }
-
-        .export-details {
-            background: #333;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 20px;
-        }
-
-        .detail-item {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-
-        .detail-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .detail-label {
-            color: #999;
-            font-size: 13px;
-        }
-
-        .detail-value {
-            color: #e0e0e0;
-            font-size: 13px;
-            font-weight: 500;
-        }
-
-        .export-progress-bar {
-            background: #444;
-            border-radius: 10px;
-            height: 8px;
-            margin-bottom: 20px;
-            overflow: hidden;
-        }
-
-        .progress-bar-fill {
-            background: linear-gradient(90deg, #42a5f5, #52b788);
-            height: 100%;
-            width: 0%;
-            transition: width 0.3s ease;
-            border-radius: 10px;
-        }
-
-        .cancel-export {
-            width: 100%;
-            background: #444;
-            color: #e0e0e0;
-            border: 1px solid #666;
-            padding: 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s ease;
-        }
-
-        .cancel-export:hover {
-            background: #555;
-        }
-
-        .cancel-export:disabled {
-            background: #333;
-            color: #666;
-            cursor: not-allowed;
-        }
-
-        .keyboard-hint {
-            text-align: center;
-            margin: 10px 0;
-            color: #999;
-            font-size: 14px;
-        }
-
-        h1 {
-            color: #e0e0e0;
-            text-align: center;
-        }
-
-        h3 {
-            color: #e0e0e0;
-        }
-
-        .size-controls {
-            text-align: center;
-            margin: 10px 0;
-        }
-
-        .size-controls button {
-            padding: 5px 10px;
-            margin: 0 2px;
-            background: #444;
-            color: #e0e0e0;
-            border: 1px solid #666;
-            border-radius: 3px;
-            cursor: pointer;
-            font-size: 12px;
-        }
-
-        .size-controls button:hover {
-            background: #555;
-        }
-
-        .size-controls button.active {
-            background: #0d7377;
-            border-color: #14a085;
-        }
-
-        .size-slider {
-            margin: 0 10px;
-            width: 200px;
-        }
-
-        .size-info {
-            color: #999;
-            font-size: 12px;
-            margin-left: 10px;
-        }
-    </style>
+    <link rel="stylesheet" href="/static/css/style.css">
 </head>
 
 <body>
@@ -742,8 +92,10 @@
             </div>
 
             <div class="keyboard-hint">
-                Use ← → arrow keys to navigate frames | Ctrl+P/N for prev/next change | Click and drag to add rectangles | Click rectangle to
-                select/move | Drag handles to resize | Click × to delete, ↺ to restore | Green = inherited, Grey = deleted
+                Use ← → arrow keys to navigate frames | Ctrl+P/N for prev/next change | Click and drag to add rectangles
+                | Click rectangle to
+                select/move | Drag handles to resize | Click × to delete, ↺ to restore | Green = inherited, Grey =
+                deleted
             </div>
         </div>
 
@@ -806,7 +158,7 @@
                 const videoInfoResponse = await fetch(`/get_video_info/${currentVideo}`);
                 const videoInfo = await videoInfoResponse.json();
                 videoFPS = videoInfo.fps || 30; // Use actual FPS or default to 30
-                
+
                 // Then extract frames
                 const response = await fetch(`/extract_frames/${currentVideo}`);
                 const data = await response.json();
@@ -820,7 +172,7 @@
 
                 // Initialize frame size
                 setFrameSize('medium');
-                
+
                 // Update frame size display after initial load
                 setTimeout(() => {
                     updateFrameSizeDisplay();
@@ -872,7 +224,7 @@
         }
 
         function showFrame(frameIndex) {
-            console.log(`Showing frame ${frameIndex} of ${totalFrames}`);
+            console.log(`=== SHOWING FRAME ${frameIndex} ===`);
             console.log(`Current rectangles data:`, frameRectangles);
 
             currentFrameIndex = frameIndex;
@@ -903,30 +255,36 @@
             const frameInfo = document.getElementById('frameInfo');
             const currentRects = frameRectangles[currentFrameIndex] || [];
             const totalRects = Object.values(frameRectangles).reduce((sum, rects) => sum + rects.length, 0);
-            frameInfo.textContent = `Frame ${frameIndex + 1}/${totalFrames} | Current: ${currentRects.length} | Total: ${totalRects}`;
+            const framesWithChanges = getFramesWithChanges();
+
+            // Calculate current frame time
+            const currentTime = formatTime(frameIndex / videoFPS);
+            frameInfo.textContent = `Frame ${frameIndex + 1}/${totalFrames} (${currentTime}) | Current: ${currentRects.length} | Total: ${totalRects} | Frames with Changes: ${framesWithChanges.length}`;
 
             console.log(`Frame ${frameIndex} has ${currentRects.length} rectangles:`, currentRects);
+            console.log(`All frames with changes:`, framesWithChanges);
 
             setupDrawing();
             updateRectangles();
+            console.log(`=== END SHOWING FRAME ${frameIndex} ===`);
         }
 
         function updateFrameSizeDisplay() {
             const frameDisplay = document.getElementById('frameDisplay');
             const frameImage = document.getElementById('frameImage');
             const frameSizeInfo = document.getElementById('frameSizeInfo');
-            
+
             if (!frameSizeInfo) return;
-            
+
             const containerRect = frameDisplay.getBoundingClientRect();
             const containerWidth = Math.round(containerRect.width);
             const containerHeight = Math.round(containerRect.height);
-            
+
             if (frameImage.naturalWidth && frameImage.naturalHeight) {
                 const scale = calculateImageScale();
                 const displayedWidth = Math.round(scale.displayedWidth);
                 const displayedHeight = Math.round(scale.displayedHeight);
-                
+
                 frameSizeInfo.textContent = `Container: ${containerWidth}×${containerHeight} | Image: ${displayedWidth}×${displayedHeight} | Original: ${frameImage.naturalWidth}×${frameImage.naturalHeight}`;
             } else {
                 frameSizeInfo.textContent = `Container: ${containerWidth}×${containerHeight}`;
@@ -936,17 +294,17 @@
         function calculateImageScale() {
             const frameDisplay = document.getElementById('frameDisplay');
             const frameImage = document.getElementById('frameImage');
-            
+
             if (!frameImage.naturalWidth || !frameImage.naturalHeight) {
                 return { x: 1, y: 1, offsetX: 0, offsetY: 0 };
             }
-            
+
             const containerRect = frameDisplay.getBoundingClientRect();
             const imageAspect = frameImage.naturalWidth / frameImage.naturalHeight;
             const containerAspect = containerRect.width / containerRect.height;
-            
+
             let displayedWidth, displayedHeight, offsetX, offsetY;
-            
+
             if (imageAspect > containerAspect) {
                 // Image is wider, limited by container width
                 displayedWidth = containerRect.width;
@@ -960,7 +318,7 @@
                 offsetX = (containerRect.width - displayedWidth) / 2;
                 offsetY = 0;
             }
-            
+
             return {
                 x: frameImage.naturalWidth / displayedWidth,
                 y: frameImage.naturalHeight / displayedHeight,
@@ -973,7 +331,7 @@
 
         function setupDrawing() {
             const frameDisplay = document.getElementById('frameDisplay');
-            
+
             // Set up ResizeObserver to monitor frame container size changes
             if (window.ResizeObserver) {
                 const resizeObserver = new ResizeObserver((entries) => {
@@ -1002,18 +360,18 @@
 
                 isDrawing = true;
                 const rect = frameDisplay.getBoundingClientRect();
-                
+
                 // Adjust coordinates to account for image offset and ensure they're within image bounds
                 const rawX = e.clientX - rect.left;
                 const rawY = e.clientY - rect.top;
-                
+
                 // Only allow drawing within the actual image area
                 if (rawX < imageScale.offsetX || rawX > imageScale.offsetX + imageScale.displayedWidth ||
                     rawY < imageScale.offsetY || rawY > imageScale.offsetY + imageScale.displayedHeight) {
                     isDrawing = false;
                     return;
                 }
-                
+
                 startX = rawX;
                 startY = rawY;
 
@@ -1033,7 +391,7 @@
                     // Constrain drawing to image bounds
                     currentX = Math.max(imageScale.offsetX, Math.min(currentX, imageScale.offsetX + imageScale.displayedWidth));
                     currentY = Math.max(imageScale.offsetY, Math.min(currentY, imageScale.offsetY + imageScale.displayedHeight));
-                    
+
                     const width = Math.abs(currentX - startX);
                     const height = Math.abs(currentY - startY);
                     const left = Math.min(startX, currentX);
@@ -1046,11 +404,11 @@
                 } else if (isDragging && selectedRect) {
                     let newX = currentX - dragOffset.x;
                     let newY = currentY - dragOffset.y;
-                    
+
                     // Constrain dragging to image bounds
                     const rectWidth = parseInt(selectedRect.element.style.width);
                     const rectHeight = parseInt(selectedRect.element.style.height);
-                    
+
                     newX = Math.max(imageScale.offsetX, Math.min(newX, imageScale.offsetX + imageScale.displayedWidth - rectWidth));
                     newY = Math.max(imageScale.offsetY, Math.min(newY, imageScale.offsetY + imageScale.displayedHeight - rectHeight));
 
@@ -1075,41 +433,52 @@
                         if (!frameRectangles[currentFrameIndex]) {
                             frameRectangles[currentFrameIndex] = [];
                         }
-                        
+
                         // Convert display coordinates to image coordinates for storage
                         const imageX = (x - imageScale.offsetX) * imageScale.x;
                         const imageY = (y - imageScale.offsetY) * imageScale.y;
                         const imageWidth = width * imageScale.x;
                         const imageHeight = height * imageScale.y;
+
+                        // Generate a proper rectangleId for the new rectangle
+                        const rectIndex = frameRectangles[currentFrameIndex].length;
+                        const rectangleId = `${currentFrameIndex}_${rectIndex}`;
                         
-                        const newRect = { 
-                            x: Math.round(imageX), 
-                            y: Math.round(imageY), 
-                            width: Math.round(imageWidth), 
-                            height: Math.round(imageHeight) 
+                        const newRect = {
+                            x: Math.round(imageX),
+                            y: Math.round(imageY),
+                            width: Math.round(imageWidth),
+                            height: Math.round(imageHeight),
+                            rectangleId: rectangleId
                         };
                         frameRectangles[currentFrameIndex].push(newRect);
                         console.log(`Added rectangle to frame ${currentFrameIndex}:`, newRect);
                         console.log(`Frame ${currentFrameIndex} now has ${frameRectangles[currentFrameIndex].length} rectangles`);
                         updateFrameInfo();
+
+                        // Auto-save after adding new rectangle
+                        autoSaveRectangles();
                     }
 
                     currentRect = null;
                     updateRectangles();
                 } else if (isDragging && selectedRect) {
+                    console.log('Rectangle drag completed, updating data...');
+                    console.log('Selected rectangle:', selectedRect.rect);
+
                     // Update rectangle data
                     const rectStyle = selectedRect.element.style;
                     const displayX = parseInt(rectStyle.left);
                     const displayY = parseInt(rectStyle.top);
                     const displayWidth = parseInt(rectStyle.width);
                     const displayHeight = parseInt(rectStyle.height);
-                    
+
                     // Convert display coordinates to image coordinates for storage
                     const imageX = (displayX - imageScale.offsetX) * imageScale.x;
                     const imageY = (displayY - imageScale.offsetY) * imageScale.y;
                     const imageWidth = displayWidth * imageScale.x;
                     const imageHeight = displayHeight * imageScale.y;
-                    
+
                     const rectData = {
                         x: Math.round(imageX),
                         y: Math.round(imageY),
@@ -1117,23 +486,94 @@
                         height: Math.round(imageHeight)
                     };
 
+                    console.log('Rectangle data to save:', rectData);
+
                     if (selectedRect.rect && !selectedRect.rect.isFromCurrentFrame) {
-                        // If adjusting an inherited rectangle, create a new one on current frame
+                        // If adjusting an inherited rectangle, we need to track this as a move event
+                        // But don't create duplicate entries - the getAllRectanglesForFrame handles this
+                        const originalRectId = selectedRect.rect.rectId;
+
+                        console.log('Moving inherited rectangle:', { originalRectId, newPosition: rectData });
+
+                        // Ensure the current frame has a rectangles array
                         if (!frameRectangles[currentFrameIndex]) {
                             frameRectangles[currentFrameIndex] = [];
                         }
-                        frameRectangles[currentFrameIndex].push(rectData);
-                        showStatus(`Created adjusted rectangle on frame ${currentFrameIndex + 1}`, 'success');
-                        updateFrameInfo();
-                        updateRectangles();
+
+                        // Create a rectangleMoved event entry
+                        const movedRect = {
+                            rectangleMoved: originalRectId, // Reference to the original rectangle
+                            x: rectData.x,
+                            y: rectData.y,
+                            width: rectData.width,
+                            height: rectData.height
+                        };
+
+                        frameRectangles[currentFrameIndex].push(movedRect);
+                        console.log('Created rectangleMoved event:', movedRect);
+                        showStatus(`Rectangle moved from frame ${parseInt(originalRectId.split('_')[0]) + 1} to frame ${currentFrameIndex + 1}`, 'success');
                     } else {
                         // Update rectangle that was created on current frame
+                        const allCurrentRects = frameRectangles[currentFrameIndex] || [];
                         const currentRects = getCurrentFrameRectangles();
-                        if (currentRects[selectedRect.index]) {
-                            Object.assign(currentRects[selectedRect.index], rectData);
+
+                        console.log('Updating current frame rectangle:');
+                        console.log('Selected rect index:', selectedRect.index);
+                        console.log('All current rects (including removal markers):', allCurrentRects);
+                        console.log('Filtered current rects (no removal markers):', currentRects);
+
+                        // Find the actual index in the full array (including removal markers)
+                        let actualIndex = -1;
+
+                        // If the selected rectangle has a rectId, use it to find the original rectangle
+                        if (selectedRect.rect && selectedRect.rect.rectId) {
+                            const rectIdParts = selectedRect.rect.rectId.split('_');
+                            const originalFrame = parseInt(rectIdParts[0]);
+                            const originalIndex = parseInt(rectIdParts[1]);
+
+                            if (originalFrame === currentFrameIndex) {
+                                // This rectangle was created on the current frame
+                                actualIndex = originalIndex;
+                            }
+                        }
+
+                        // If we couldn't find the index using rectId, try to match by coordinates
+                        if (actualIndex === -1 && currentRects.length !== allCurrentRects.length) {
+                            // There are removal markers, so we need to find the correct index
+                            if (selectedRect.index < currentRects.length) {
+                                const targetRect = currentRects[selectedRect.index];
+                                actualIndex = allCurrentRects.findIndex(rect =>
+                                    !rect.isRemovalMarker &&
+                                    rect.x === targetRect.x &&
+                                    rect.y === targetRect.y &&
+                                    rect.width === targetRect.width &&
+                                    rect.height === targetRect.height
+                                );
+                            }
+                        }
+
+                        // If still not found, try using the selected index directly
+                        if (actualIndex === -1 && selectedRect.index < allCurrentRects.length && !allCurrentRects[selectedRect.index].isRemovalMarker) {
+                            actualIndex = selectedRect.index;
+                        }
+
+                        console.log('Calculated actual index:', actualIndex);
+
+                        if (actualIndex !== -1 && allCurrentRects && allCurrentRects[actualIndex]) {
+                            const oldData = { ...allCurrentRects[actualIndex] };
+                            Object.assign(allCurrentRects[actualIndex], rectData);
+                            console.log('Updated rectangle from', oldData, 'to', allCurrentRects[actualIndex]);
+                        } else {
+                            console.error('Could not find current rectangle to update:', actualIndex);
+                            console.error('Available rectangle indices:', Object.keys(allCurrentRects || {}));
+                            console.error('Selected rectangle data:', selectedRect);
                         }
                     }
                     isDragging = false;
+
+                    // Auto-save after rectangle modification
+                    console.log('Rectangle moved, triggering auto-save...');
+                    autoSaveRectangles();
                 } else if (isResizing && selectedRect) {
                     // Update rectangle data
                     const rectStyle = selectedRect.element.style;
@@ -1141,13 +581,13 @@
                     const displayY = parseInt(rectStyle.top);
                     const displayWidth = parseInt(rectStyle.width);
                     const displayHeight = parseInt(rectStyle.height);
-                    
+
                     // Convert display coordinates to image coordinates for storage
                     const imageX = (displayX - imageScale.offsetX) * imageScale.x;
                     const imageY = (displayY - imageScale.offsetY) * imageScale.y;
                     const imageWidth = displayWidth * imageScale.x;
                     const imageHeight = displayHeight * imageScale.y;
-                    
+
                     const rectData = {
                         x: Math.round(imageX),
                         y: Math.round(imageY),
@@ -1156,23 +596,78 @@
                     };
 
                     if (selectedRect.rect && !selectedRect.rect.isFromCurrentFrame) {
-                        // If resizing an inherited rectangle, create a new one on current frame
+                        // If resizing an inherited rectangle, create a rectangleResized event
+                        const originalRectId = selectedRect.rect.rectId;
+
+                        console.log('Creating rectangleResized entry for inherited rectangle:', { originalRectId });
+
+                        // Ensure the current frame has a rectangles array
                         if (!frameRectangles[currentFrameIndex]) {
                             frameRectangles[currentFrameIndex] = [];
                         }
-                        frameRectangles[currentFrameIndex].push(rectData);
-                        showStatus(`Created resized rectangle on frame ${currentFrameIndex + 1}`, 'success');
-                        updateFrameInfo();
-                        updateRectangles();
+
+                        // Create a new rectangle entry with the rectangleResized property
+                        const resizedRect = {
+                            ...rectData,
+                            rectangleResized: originalRectId // Reference to the original rectangle
+                        };
+
+                        frameRectangles[currentFrameIndex].push(resizedRect);
+                        console.log('Created rectangleResized entry:', resizedRect);
+                        showStatus(`Rectangle resized from frame ${parseInt(originalRectId.split('_')[0]) + 1}`, 'success');
                     } else {
                         // Update rectangle that was created on current frame
+                        const allCurrentRects = frameRectangles[currentFrameIndex] || [];
                         const currentRects = getCurrentFrameRectangles();
-                        if (currentRects[selectedRect.index]) {
-                            Object.assign(currentRects[selectedRect.index], rectData);
+
+                        // Find the actual index in the full array (including removal markers)
+                        let actualIndex = -1;
+
+                        // If the selected rectangle has a rectId, use it to find the original rectangle
+                        if (selectedRect.rect && selectedRect.rect.rectId) {
+                            const rectIdParts = selectedRect.rect.rectId.split('_');
+                            const originalFrame = parseInt(rectIdParts[0]);
+                            const originalIndex = parseInt(rectIdParts[1]);
+
+                            if (originalFrame === currentFrameIndex) {
+                                // This rectangle was created on the current frame
+                                actualIndex = originalIndex;
+                            }
+                        }
+
+                        // If we couldn't find the index using rectId, try to match by coordinates
+                        if (actualIndex === -1 && currentRects.length !== allCurrentRects.length) {
+                            // There are removal markers, so we need to find the correct index
+                            if (selectedRect.index < currentRects.length) {
+                                const targetRect = currentRects[selectedRect.index];
+                                actualIndex = allCurrentRects.findIndex(rect =>
+                                    !rect.isRemovalMarker &&
+                                    rect.x === targetRect.x &&
+                                    rect.y === targetRect.y &&
+                                    rect.width === targetRect.width &&
+                                    rect.height === targetRect.height
+                                );
+                            }
+                        }
+
+                        // If still not found, try using the selected index directly
+                        if (actualIndex === -1 && selectedRect.index < allCurrentRects.length && !allCurrentRects[selectedRect.index].isRemovalMarker) {
+                            actualIndex = selectedRect.index;
+                        }
+
+                        if (actualIndex !== -1 && allCurrentRects && allCurrentRects[actualIndex]) {
+                            Object.assign(allCurrentRects[actualIndex], rectData);
+                        } else {
+                            console.error('Could not find current rectangle to update during resize:', actualIndex);
+                            console.error('Available rectangle indices:', Object.keys(allCurrentRects || {}));
+                            console.error('Selected rectangle data:', selectedRect);
                         }
                     }
                     isResizing = false;
                     resizeHandle = null;
+
+                    // Auto-save after rectangle modification
+                    autoSaveRectangles();
                 }
             };
         }
@@ -1235,13 +730,13 @@
         function getActiveRectanglesForFrame(frameIndex) {
             // Get all rectangles that should be active on this frame
             const activeRects = [];
-            
+
             // Look through all frames from 0 to current frame
             for (let i = 0; i <= frameIndex; i++) {
                 if (frameRectangles[i]) {
                     frameRectangles[i].forEach((rect, rectIndex) => {
                         const rectId = `${i}_${rectIndex}`;
-                        
+
                         // Check if this rectangle was removed in a later frame
                         let isRemoved = false;
                         for (let j = i + 1; j <= frameIndex; j++) {
@@ -1254,7 +749,7 @@
                                 }
                             }
                         }
-                        
+
                         if (!isRemoved) {
                             activeRects.push({
                                 ...rect,
@@ -1266,63 +761,98 @@
                     });
                 }
             }
-            
+
             return activeRects;
         }
 
         function getAllRectanglesForFrame(frameIndex) {
             // Get all rectangles including deleted ones for display purposes
             const allRects = [];
-            
-            console.log(`\n=== getAllRectanglesForFrame(${frameIndex}) ===`);
+            const rectangleStates = {}; // Track current state of each rectangle
+
+            console.log(`\n=== GET ALL RECTANGLES FOR FRAME(${frameIndex}) ===`);
             console.log('Current frameRectangles:', frameRectangles);
-            
-            // Look through all frames from 0 to current frame
+
+            // First pass: Build rectangle states by processing all events chronologically
             for (let i = 0; i <= frameIndex; i++) {
                 if (frameRectangles[i]) {
                     console.log(`Processing frame ${i} with ${frameRectangles[i].length} items`);
                     frameRectangles[i].forEach((rect, rectIndex) => {
                         if (rect.isRemovalMarker) {
-                            console.log(`  Skipping removal marker:`, rect);
-                            return; // Skip removal markers
-                        }
-                        
-                        const rectId = `${i}_${rectIndex}`;
-                        console.log(`  Processing rectangle ${rectId}:`, rect);
-                        
-                        // Check if this rectangle was removed in current frame or later
-                        let isRemoved = false;
-                        for (let j = i; j <= frameIndex; j++) {
-                            if (frameRectangles[j]) {
-                                // Check if any rectangle in frame j is marked as removing this one
-                                const removedRect = frameRectangles[j].find(r => r.removesRect === rectId);
-                                if (removedRect) {
-                                    console.log(`    Found removal marker for rectId ${rectId} in frame ${j}:`, removedRect);
-                                    isRemoved = true;
-                                    break;
-                                }
+                            // Handle deletion
+                            const deletedRectId = rect.removesRect;
+                            console.log(`  Found removal marker for ${deletedRectId} in frame ${i}:`, rect);
+                            if (rectangleStates[deletedRectId]) {
+                                rectangleStates[deletedRectId].isDeleted = true;
+                                rectangleStates[deletedRectId].removalFrame = i;
+                                console.log(`  Marked rectangle ${deletedRectId} as deleted in frame ${i}`);
+                            } else {
+                                console.log(`  WARNING: Cannot find rectangle ${deletedRectId} to mark as deleted`);
                             }
+                        } else if (rect.rectangleMoved) {
+                            // Handle move - update the original rectangle's position
+                            const originalRectId = rect.rectangleMoved;
+                            if (rectangleStates[originalRectId]) {
+                                rectangleStates[originalRectId].x = rect.x;
+                                rectangleStates[originalRectId].y = rect.y;
+                                rectangleStates[originalRectId].width = rect.width;
+                                rectangleStates[originalRectId].height = rect.height;
+                                rectangleStates[originalRectId].lastMoveFrame = i;
+                                console.log(`  Updated rectangle ${originalRectId} position in frame ${i}:`, rect);
+                            }
+                        } else if (rect.rectangleResized) {
+                            // Handle resize - update the original rectangle's dimensions
+                            const originalRectId = rect.rectangleResized;
+                            if (rectangleStates[originalRectId]) {
+                                rectangleStates[originalRectId].x = rect.x;
+                                rectangleStates[originalRectId].y = rect.y;
+                                rectangleStates[originalRectId].width = rect.width;
+                                rectangleStates[originalRectId].height = rect.height;
+                                rectangleStates[originalRectId].lastResizeFrame = i;
+                                console.log(`  Updated rectangle ${originalRectId} size in frame ${i}:`, rect);
+                            }
+                        } else if (rect.hasOwnProperty('x') && rect.hasOwnProperty('y')) {
+                            // Handle creation - add new rectangle
+                            // Use the rectangleId from the rectangle data, or generate one if missing
+                            const rectId = rect.rectangleId || `${i}_${rectIndex}`;
+                            rectangleStates[rectId] = {
+                                ...rect,
+                                originalFrame: i,
+                                rectId: rectId,
+                                isFromCurrentFrame: i === frameIndex,
+                                isDeleted: false,
+                                removalFrame: null,
+                                lastMoveFrame: null,
+                                lastResizeFrame: null
+                            };
+                            console.log(`  Created rectangle ${rectId} in frame ${i}:`, rect);
                         }
-                        
-                        console.log(`    Rectangle ${rectId}: isRemoved=${isRemoved}`);
-                        
-                        allRects.push({
-                            ...rect,
-                            originalFrame: i,
-                            rectId: rectId,
-                            isFromCurrentFrame: i === frameIndex,
-                            isDeleted: isRemoved
-                        });
                     });
                 }
             }
-            
-            console.log(`=== Returning ${allRects.length} rectangles ===\n`);
+
+            // Second pass: Add active rectangles to display list
+            console.log(`Final rectangleStates for frame ${frameIndex}:`, Object.keys(rectangleStates));
+            for (const [rectId, rectState] of Object.entries(rectangleStates)) {
+                if (!rectState.isDeleted || rectState.removalFrame === frameIndex) {
+                    // Show rectangle if it's not deleted, or if it was deleted on current frame (to show ghost)
+                    allRects.push({
+                        ...rectState,
+                        isMoved: rectState.lastMoveFrame !== null,
+                        isResized: rectState.lastResizeFrame !== null
+                    });
+                    console.log(`  Added rectangle ${rectId} to display list - pos:(${rectState.x},${rectState.y})`);
+                } else {
+                    console.log(`  Skipped deleted rectangle ${rectId} (deleted in frame ${rectState.removalFrame})`);
+                }
+            }
+
+            console.log(`=== RETURNING ${allRects.length} RECTANGLES ===\n`);
             return allRects;
         }
 
         function updateRectangles() {
-            console.log(`updateRectangles called for frame ${currentFrameIndex}`);
+            console.log(`=== UPDATE RECTANGLES FOR FRAME ${currentFrameIndex} ===`);
             const frameDisplay = document.getElementById('frameDisplay');
             const existingRects = frameDisplay.querySelectorAll('.rectangle');
             console.log(`Removing ${existingRects.length} existing rectangle elements`);
@@ -1335,25 +865,36 @@
             // Get all rectangles including deleted ones for current frame
             const allRects = getAllRectanglesForFrame(currentFrameIndex);
             console.log(`Drawing ${allRects.length} rectangles for frame ${currentFrameIndex}:`, allRects);
-            
+
             allRects.forEach((rect, index) => {
+                console.log(`Drawing rectangle ${index}:`, rect);
                 const rectDiv = document.createElement('div');
-                
+
                 // Style based on rectangle state
-                if (rect.isDeleted) {
+                if (rect.isDeleted && rect.removalFrame === currentFrameIndex) {
+                    // Show deleted rectangle as ghost ONLY on the frame where it was deleted
                     rectDiv.className = 'rectangle deleted-rectangle';
+                } else if (rect.isDeleted && rect.removalFrame < currentFrameIndex) {
+                    // For frames after deletion, don't show the deleted rectangle at all
+                    return; // Skip this rectangle entirely
+                } else if (rect.isMoved) {
+                    // Show moved rectangle with a special style
+                    rectDiv.className = 'rectangle moved-rectangle';
+                } else if (rect.isResized) {
+                    // Show resized rectangle with a special style
+                    rectDiv.className = 'rectangle resized-rectangle';
                 } else if (rect.isFromCurrentFrame) {
                     rectDiv.className = 'rectangle';
                 } else {
                     rectDiv.className = 'rectangle inherited-rectangle';
                 }
-                
+
                 // Convert image coordinates to display coordinates
                 const displayX = (rect.x / imageScale.x) + imageScale.offsetX;
                 const displayY = (rect.y / imageScale.y) + imageScale.offsetY;
                 const displayWidth = rect.width / imageScale.x;
                 const displayHeight = rect.height / imageScale.y;
-                
+
                 rectDiv.style.left = Math.round(displayX) + 'px';
                 rectDiv.style.top = Math.round(displayY) + 'px';
                 rectDiv.style.width = Math.round(displayWidth) + 'px';
@@ -1381,15 +922,11 @@
                             startDragging(e, rectDiv, index, rect);
                         }
                     };
-                } else {
-                    // Deleted rectangles are not selectable or draggable
-                    rectDiv.style.pointerEvents = 'none';
-                    actionBtn.style.pointerEvents = 'auto'; // But the undelete button still works
                 }
 
                 // Add delete/undelete button
                 const actionBtn = document.createElement('div');
-                
+
                 if (rect.isDeleted) {
                     // Show undelete button for deleted rectangles
                     actionBtn.className = 'rectangle-undelete';
@@ -1412,20 +949,64 @@
 
                 rectDiv.appendChild(actionBtn);
                 frameDisplay.appendChild(rectDiv);
+
+                // If this is a deleted rectangle, make it non-interactive but keep the undelete button functional
+                if (rect.isDeleted) {
+                    rectDiv.style.pointerEvents = 'none';
+                    // Find the undelete button and make it clickable
+                    const undeleteBtn = rectDiv.querySelector('.rectangle-undelete');
+                    if (undeleteBtn) {
+                        undeleteBtn.style.pointerEvents = 'auto';
+                    }
+                }
             });
+            console.log(`=== END UPDATE RECTANGLES FOR FRAME ${currentFrameIndex} ===`);
         }
-        
+
         function handleRectangleDelete(rect, index) {
             if (rect.isFromCurrentFrame) {
                 // Rectangle was created on current frame - delete it entirely
+                const allCurrentRects = frameRectangles[currentFrameIndex] || [];
                 const currentRects = getCurrentFrameRectangles();
-                const actualIndex = currentRects.findIndex(r => 
-                    r.x === rect.x && r.y === rect.y && r.width === rect.width && r.height === rect.height
-                );
-                
-                if (actualIndex !== -1) {
-                    currentRects.splice(actualIndex, 1);
-                    if (currentRects.length === 0) {
+
+                // Find the actual index in the full array (including removal markers)
+                let actualIndex = -1;
+
+                // If the selected rectangle has a rectId, use it to find the original rectangle
+                if (rect && rect.rectId) {
+                    const rectIdParts = rect.rectId.split('_');
+                    const originalFrame = parseInt(rectIdParts[0]);
+                    const originalIndex = parseInt(rectIdParts[1]);
+
+                    if (originalFrame === currentFrameIndex) {
+                        // This rectangle was created on the current frame
+                        actualIndex = originalIndex;
+                    }
+                }
+
+                // If we couldn't find the index using rectId, try to match by coordinates
+                if (actualIndex === -1 && currentRects.length !== allCurrentRects.length) {
+                    // There are removal markers, so we need to find the correct index
+                    if (index < currentRects.length) {
+                        const targetRect = currentRects[index];
+                        actualIndex = allCurrentRects.findIndex(r =>
+                            !r.isRemovalMarker &&
+                            r.x === targetRect.x &&
+                            r.y === targetRect.y &&
+                            r.width === targetRect.width &&
+                            r.height === targetRect.height
+                        );
+                    }
+                }
+
+                // If still not found, try using the selected index directly
+                if (actualIndex === -1 && index < allCurrentRects.length && !allCurrentRects[index].isRemovalMarker) {
+                    actualIndex = index;
+                }
+
+                if (actualIndex !== -1 && allCurrentRects && allCurrentRects[actualIndex]) {
+                    allCurrentRects.splice(actualIndex, 1);
+                    if (allCurrentRects.length === 0) {
                         delete frameRectangles[currentFrameIndex];
                     }
                     showToast(`Rectangle deleted from frame ${currentFrameIndex + 1}`, 'success', 2000);
@@ -1435,27 +1016,33 @@
                 removeRectangleFromCurrentFrame(rect.rectId);
                 showToast(`Rectangle marked for removal from frame ${currentFrameIndex + 1} forward`, 'warning', 3000);
             }
-            
+
             updateFrameInfo();
             updateRectangles();
+
+            // Auto-save after rectangle deletion
+            autoSaveRectangles();
         }
 
         function handleRectangleUndelete(rect, index) {
             // Remove the removal marker for this rectangle
             if (frameRectangles[currentFrameIndex]) {
-                const removalMarkerIndex = frameRectangles[currentFrameIndex].findIndex(r => 
+                const removalMarkerIndex = frameRectangles[currentFrameIndex].findIndex(r =>
                     r.removesRect === rect.rectId && r.isRemovalMarker
                 );
-                
+
                 if (removalMarkerIndex !== -1) {
                     frameRectangles[currentFrameIndex].splice(removalMarkerIndex, 1);
                     if (frameRectangles[currentFrameIndex].length === 0) {
                         delete frameRectangles[currentFrameIndex];
                     }
                     showToast(`Rectangle restored from frame ${currentFrameIndex + 1} forward`, 'success', 2000);
-                    
+
                     updateFrameInfo();
                     updateRectangles();
+
+                    // Auto-save after restoring rectangle
+                    autoSaveRectangles();
                 }
             }
         }
@@ -1466,7 +1053,7 @@
             if (!frameRectangles[currentFrameIndex]) {
                 frameRectangles[currentFrameIndex] = [];
             }
-            
+
             // Add a special rectangle that marks the removal
             frameRectangles[currentFrameIndex].push({
                 removesRect: rectId,
@@ -1517,7 +1104,8 @@
             const totalActiveRects = Object.keys(frameRectangles).reduce((sum, frameIndex) => {
                 return sum + getActiveRectanglesForFrame(parseInt(frameIndex)).length;
             }, 0);
-            frameInfo.textContent = `Frame ${currentFrameIndex + 1}/${totalFrames} | Active: ${activeRects.length} | Current Frame: ${currentFrameRects.length} | Total Active: ${Math.floor(totalActiveRects / Object.keys(frameRectangles).length)}`;
+            const framesWithChanges = getFramesWithChanges();
+            frameInfo.textContent = `Frame ${currentFrameIndex + 1}/${totalFrames} (${formatTime(currentFrameIndex / videoFPS)}) | Active: ${activeRects.length} | Current Frame: ${currentFrameRects.length} | Total Frames with Changes: ${framesWithChanges.length}`;
         }
 
         function startDragging(e, rectDiv, index, rect) {
@@ -1553,6 +1141,137 @@
             updateRectangles();
         }
 
+        function clearRectangles() {
+            console.log(`Clearing rectangles for frame ${currentFrameIndex}`);
+            if (frameRectangles[currentFrameIndex]) {
+                console.log(`Removed ${frameRectangles[currentFrameIndex].length} rectangles from frame ${currentFrameIndex}`);
+                delete frameRectangles[currentFrameIndex];
+            }
+
+            selectedRect = null;
+            updateFrameInfo();
+            updateRectangles();
+
+            // Auto-save after clearing rectangles
+            autoSaveRectangles();
+        }
+
+        // Unified rectangle data preparation for both export and save
+        function prepareRectangleData(includeEvents = false) {
+            const preparedData = {};
+            
+            if (includeEvents) {
+                // For save operations - include both actual rectangles AND removal markers
+                // This preserves the complete event history for reconstruction later
+                for (const [frameIndex, rectangles] of Object.entries(frameRectangles)) {
+                    const actualRectangles = rectangles.filter(rect =>
+                        rect.hasOwnProperty('x') &&
+                        rect.hasOwnProperty('y') &&
+                        rect.hasOwnProperty('width') &&
+                        rect.hasOwnProperty('height')
+                    );
+                    const removalMarkers = rectangles.filter(rect => rect.isRemovalMarker);
+                    
+                    // Combine actual rectangles with removal markers
+                    const allItems = [...actualRectangles, ...removalMarkers];
+                    if (allItems.length > 0) {
+                        preparedData[frameIndex] = allItems;
+                    }
+                }
+            } else {
+                // For export operations - calculate active rectangles for each frame
+                // This provides the final state of rectangles visible at each frame
+                for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
+                    const activeRects = getActiveRectanglesForFrame(frameIndex);
+                    if (activeRects.length > 0) {
+                        preparedData[frameIndex] = activeRects.map(rect => ({
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        }));
+                    }
+                }
+            }
+            
+            console.log(`prepareRectangleData(includeEvents=${includeEvents}):`, preparedData);
+            return preparedData;
+        }
+
+        // Auto-save functionality
+        let autoSaveTimeout = null;
+        let isAutoSaving = false;
+
+        function autoSaveRectangles() {
+            console.log('autoSaveRectangles called, currentVideo:', currentVideo);
+            // Clear any existing timeout
+            if (autoSaveTimeout) {
+                clearTimeout(autoSaveTimeout);
+            }
+
+            // Set a new timeout to save after 1 second of inactivity
+            autoSaveTimeout = setTimeout(() => {
+                if (!isAutoSaving && currentVideo) {
+                    isAutoSaving = true;
+                    console.log('Auto-saving rectangle data...');
+                    console.log('Frame rectangles to save:', frameRectangles);
+
+                    // Use the same save logic as manual save
+                    saveRectanglesData().then(() => {
+                        isAutoSaving = false;
+                        console.log('Auto-save completed successfully');
+                    }).catch(error => {
+                        console.error('Auto-save failed:', error);
+                        isAutoSaving = false;
+                    });
+                }
+            }, 1000); // Save after 1 second of inactivity
+        }
+
+        async function saveRectanglesData() {
+            // Check if any frame has rectangles
+            const hasRectangles = Object.keys(frameRectangles).length > 0;
+            if (!hasRectangles) {
+                console.log('No rectangles to save, skipping auto-save');
+                return; // Don't save if no rectangles
+            }
+
+            // Use unified data preparation for save (include events)
+            const filteredFrameRectangles = prepareRectangleData(true);
+            console.log('Filtered frame rectangles to save:', filteredFrameRectangles);
+
+            try {
+                const payload = {
+                    video_name: currentVideo,
+                    all_frame_rectangles: filteredFrameRectangles,
+                    timestamp: new Date().toISOString(),
+                    auto_save: true // Mark as auto-save
+                };
+                console.log('Sending save request with payload:', payload);
+
+                const response = await fetch('/save_rectangles', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                console.log('Save response:', result);
+                if (result.error) {
+                    console.error('Auto-save error:', result.error);
+                    showStatus(`Auto-save error: ${result.error}`, 'error');
+                } else {
+                    console.log('Auto-save completed successfully');
+                    // Show subtle notification for auto-save (less intrusive than manual save)
+                    showToast(`Auto-saved ${result.total_rectangles} rectangles`, 'success', 2000);
+                }
+            } catch (error) {
+                console.error('Auto-save failed:', error);
+                showStatus('Auto-save failed: ' + error.message, 'error');
+            }
+        }
 
         async function loadExistingRectangles() {
             if (!currentVideo) {
@@ -1564,10 +1283,12 @@
                 console.log(`Loading existing rectangles for ${currentVideo}`);
                 const response = await fetch(`/load_rectangles/${currentVideo}`);
                 const data = await response.json();
+                console.log('Load rectangles response:', data);
 
                 if (data.success && data.frame_rectangles && Object.keys(data.frame_rectangles).length > 0) {
                     // Merge with existing rectangles (in case user already added some)
                     frameRectangles = { ...frameRectangles, ...data.frame_rectangles };
+                    console.log('Merged frameRectangles:', frameRectangles);
 
                     console.log(`Loaded ${data.total_rectangles} rectangles across ${data.total_frames} frames`);
                     showStatus(`Loaded ${data.total_rectangles} existing rectangles from ${data.filename}`, 'success');
@@ -1604,20 +1325,8 @@
 
             showToast('Saving rectangle data...', 'info', 2000);
 
-            // Filter out removal markers - only send actual rectangles with coordinates
-            const filteredFrameRectangles = {};
-            for (const [frameIndex, rectangles] of Object.entries(frameRectangles)) {
-                const actualRectangles = rectangles.filter(rect => 
-                    !rect.isRemovalMarker && 
-                    rect.hasOwnProperty('x') && 
-                    rect.hasOwnProperty('y') && 
-                    rect.hasOwnProperty('width') && 
-                    rect.hasOwnProperty('height')
-                );
-                if (actualRectangles.length > 0) {
-                    filteredFrameRectangles[frameIndex] = actualRectangles;
-                }
-            }
+            // Use unified data preparation for save (include events)
+            const filteredFrameRectangles = prepareRectangleData(true);
 
             try {
                 const response = await fetch('/save_rectangles', {
@@ -1678,10 +1387,10 @@
         function updateExportStep(stepId, status, text = null) {
             const step = document.getElementById(stepId);
             step.className = `export-step ${status}`;
-            
+
             const statusElement = step.querySelector('.step-status');
             const iconElement = step.querySelector('.step-icon');
-            
+
             if (status === 'active') {
                 statusElement.textContent = 'running';
                 iconElement.textContent = '🔄';
@@ -1692,7 +1401,7 @@
                 statusElement.textContent = 'error';
                 iconElement.textContent = '❌';
             }
-            
+
             if (text) {
                 step.querySelector('.step-text').textContent = text;
             }
@@ -1726,31 +1435,77 @@
         async function exportBlurred() {
             // Show the export modal
             showExportModal();
-            
+
             // Step 1: Analyze and build export data
             updateExportStep('step1', 'active');
             updateExportProgress(10, 'Analyzing rectangles...');
+
+            // Create export data in JSON events format to preserve rectangleId tracking
+            const exportData = {
+                frames: []
+            };
             
-            const exportFrameRectangles = {};
+            // Convert frameRectangles to structured event format
             let totalRectangles = 0;
-            
-            // Calculate active rectangles for each frame up to the total frame count
-            for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
-                const activeRects = getActiveRectanglesForFrame(frameIndex);
-                if (activeRects.length > 0) {
-                    exportFrameRectangles[frameIndex] = activeRects.map(rect => ({
-                        x: rect.x,
-                        y: rect.y,
-                        width: rect.width,
-                        height: rect.height
-                    }));
-                    totalRectangles += activeRects.length;
+            for (const [frameIndex, rectangles] of Object.entries(frameRectangles)) {
+                if (!rectangles || rectangles.length === 0) continue;
+                
+                const frameData = {
+                    frame_number: parseInt(frameIndex),
+                    events: []
+                };
+                
+                for (const rect of rectangles) {
+                    if (rect.isRemovalMarker) {
+                        // Handle deletion event
+                        frameData.events.push({
+                            eventType: 'rectangleDeleted',
+                            rectangleId: rect.removesRect
+                        });
+                    } else if (rect.rectangleMoved) {
+                        // Handle move event
+                        frameData.events.push({
+                            eventType: 'rectangleMoved',
+                            rectangleId: rect.rectangleMoved,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    } else if (rect.rectangleResized) {
+                        // Handle resize event
+                        frameData.events.push({
+                            eventType: 'rectangleResized',
+                            rectangleId: rect.rectangleResized,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    } else if (rect.hasOwnProperty('x') && rect.rectangleId) {
+                        // Handle creation event
+                        frameData.events.push({
+                            eventType: 'rectangleCreated',
+                            rectangleId: rect.rectangleId,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    }
+                }
+                
+                if (frameData.events.length > 0) {
+                    exportData.frames.push(frameData);
                 }
             }
-            
-            const framesWithRects = Object.keys(exportFrameRectangles).length;
+
+            const framesWithRects = exportData.frames.length;
             updateExportDetails(framesWithRects, totalRectangles, 'Checking...');
-            
+
             // Check if any frame has rectangles
             if (framesWithRects === 0) {
                 updateExportStep('step1', 'error');
@@ -1768,7 +1523,7 @@
             try {
                 // Create AbortController for cancellation
                 exportAbortController = new AbortController();
-                
+
                 const response = await fetch('/export_blurred', {
                     method: 'POST',
                     headers: {
@@ -1776,7 +1531,7 @@
                     },
                     body: JSON.stringify({
                         video_name: currentVideo,
-                        all_frame_rectangles: exportFrameRectangles,
+                        frames: exportData.frames,  // Send in events format
                         blur_radius: 15  // Default Gaussian blur radius
                     }),
                     signal: exportAbortController.signal
@@ -1785,13 +1540,13 @@
                 // Step 2: Processing frames
                 updateExportStep('step2', 'active');
                 updateExportProgress(50, 'Processing frames with blur...');
-                
+
                 // Step 3: Audio handling  
                 updateExportStep('step3', 'active');
                 updateExportProgress(75, 'Processing audio...');
-                
+
                 const result = await response.json();
-                
+
                 if (result.error) {
                     updateExportStep('step2', 'error');
                     updateExportStep('step3', 'error');
@@ -1807,17 +1562,17 @@
                     updateExportStep('step3', 'completed', 'Audio track copied');
                     updateExportStep('step4', 'active');
                     updateExportProgress(90, 'Finalizing export...');
-                    
+
                     // Update audio status based on result
                     const audioStatus = result.has_audio ? 'Included' : 'Not available';
                     updateExportDetails(undefined, undefined, audioStatus);
-                    
+
                     // Complete
                     setTimeout(() => {
                         updateExportStep('step4', 'completed');
                         updateExportProgress(100, 'Export completed!');
                         document.getElementById('cancelExport').disabled = true;
-                        
+
                         setTimeout(() => {
                             hideExportModal();
                             showToast(`${result.message}`, 'success', 8000);
@@ -1829,13 +1584,13 @@
                     // Export was cancelled
                     return;
                 }
-                
+
                 updateExportStep('step1', 'error');
                 updateExportStep('step2', 'error');
                 updateExportStep('step3', 'error');
                 updateExportStep('step4', 'error');
                 updateExportProgress(0, 'Export failed');
-                
+
                 setTimeout(() => {
                     hideExportModal();
                     showToast('Error exporting: ' + error.message, 'error');
@@ -1845,79 +1600,79 @@
 
         function showToast(message, type = 'success', duration = 5000) {
             const container = document.getElementById('toastContainer');
-            
+
             // Create toast element
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            
+
             // Get appropriate icon
             let icon = '✓';
             if (type === 'error') icon = '✕';
             else if (type === 'warning') icon = '⚠';
             else if (type === 'info') icon = 'ℹ';
-            
+
             // Build toast HTML
             toast.innerHTML = `
                 <span class="toast-icon">${icon}</span>
                 <div class="toast-message">${message}</div>
                 <span class="toast-close" onclick="removeToast(this.parentElement)">×</span>
             `;
-            
+
             // Add to container
             container.appendChild(toast);
-            
+
             // Trigger animation
             setTimeout(() => {
                 toast.classList.add('show');
             }, 10);
-            
+
             // Auto remove after duration
             setTimeout(() => {
                 removeToast(toast);
             }, duration);
-            
+
             return toast;
         }
-        
+
         function showToastWithHTML(htmlMessage, type = 'success', duration = 5000) {
             const container = document.getElementById('toastContainer');
-            
+
             // Create toast element
             const toast = document.createElement('div');
             toast.className = `toast ${type}`;
-            
+
             // Get appropriate icon
             let icon = '✓';
             if (type === 'error') icon = '✕';
             else if (type === 'warning') icon = '⚠';
             else if (type === 'info') icon = 'ℹ';
-            
+
             // Build toast HTML with raw HTML message
             toast.innerHTML = `
                 <span class="toast-icon">${icon}</span>
                 <div class="toast-message">${htmlMessage}</div>
                 <span class="toast-close" onclick="removeToast(this.parentElement)">×</span>
             `;
-            
+
             // Add to container
             container.appendChild(toast);
-            
+
             // Trigger animation
             setTimeout(() => {
                 toast.classList.add('show');
             }, 10);
-            
+
             // Auto remove after duration
             setTimeout(() => {
                 removeToast(toast);
             }, duration);
-            
+
             return toast;
         }
 
         function removeToast(toast) {
             if (!toast || !toast.parentElement) return;
-            
+
             toast.classList.remove('show');
             setTimeout(() => {
                 if (toast.parentElement) {
@@ -1925,7 +1680,7 @@
                 }
             }, 300);
         }
-        
+
         // Legacy function for backward compatibility
         function showStatus(message, type) {
             showToast(message, type);
@@ -2035,7 +1790,7 @@
 
             frameDisplay.style.width = width;
             frameDisplay.style.height = height;
-            
+
             // Update frame size display after setting new size
             setTimeout(() => {
                 updateFrameSizeDisplay();
@@ -2055,7 +1810,7 @@
             frameDisplay.style.width = width;
             frameDisplay.style.height = height;
             sizeInfo.textContent = value + 'px';
-            
+
             // Update frame size display after setting custom size
             setTimeout(() => {
                 updateFrameSizeDisplay();
@@ -2076,27 +1831,50 @@
 
         function getFramesWithChanges() {
             const framesWithChanges = new Set();
-            
+
             // Get all frames that have rectangle data
             const frameNumbers = Object.keys(frameRectangles).map(f => parseInt(f)).sort((a, b) => a - b);
-            
+
+            console.log('getFramesWithChanges - frameRectangles:', frameRectangles);
+            console.log('getFramesWithChanges - frameNumbers:', frameNumbers);
+
             for (let frameNum of frameNumbers) {
                 const rects = frameRectangles[frameNum];
-                
+                console.log(`Frame ${frameNum} has ${rects.length} rectangles:`, rects);
+
                 // Check for new rectangles (additions)
                 const actualRects = rects.filter(r => !r.isRemovalMarker);
                 if (actualRects.length > 0) {
+                    console.log(`Frame ${frameNum} has ${actualRects.length} actual rectangles - adding to changes`);
                     framesWithChanges.add(frameNum);
                 }
-                
-                // Check for removal markers
+
+                // Check for removal markers (deleted rectangles)
                 const removals = rects.filter(r => r.isRemovalMarker);
                 if (removals.length > 0) {
+                    console.log(`Frame ${frameNum} has ${removals.length} removal markers - adding to changes`);
+                    framesWithChanges.add(frameNum);
+                }
+
+                // Check for rectangleMoved entries
+                const movedRects = rects.filter(r => r.rectangleMoved);
+                if (movedRects.length > 0) {
+                    console.log(`Frame ${frameNum} has ${movedRects.length} moved rectangles - adding to changes`);
+                    framesWithChanges.add(frameNum);
+                }
+
+                // Check for rectangleResized entries
+                const resizedRects = rects.filter(r => r.rectangleResized);
+                if (resizedRects.length > 0) {
+                    console.log(`Frame ${frameNum} has ${resizedRects.length} resized rectangles - adding to changes`);
                     framesWithChanges.add(frameNum);
                 }
             }
-            
-            return Array.from(framesWithChanges).sort((a, b) => a - b);
+
+            const result = Array.from(framesWithChanges).sort((a, b) => a - b);
+            console.log('getFramesWithChanges - framesWithChanges:', result);
+            console.log('getFramesWithChanges - Total changes detected:', result.length);
+            return result;
         }
 
         function navigateToPreviousChange() {
@@ -2104,14 +1882,14 @@
                 showStatus('No video loaded', 'error');
                 return;
             }
-            
+
             const framesWithChanges = getFramesWithChanges();
-            
+
             if (framesWithChanges.length === 0) {
                 showStatus('No rectangle changes found', 'error');
                 return;
             }
-            
+
             // Find the previous frame with changes before current frame
             let previousChangeFrame = null;
             for (let i = framesWithChanges.length - 1; i >= 0; i--) {
@@ -2121,7 +1899,7 @@
                     break;
                 }
             }
-            
+
             // If no changes found before current frame, wrap to the last change
             if (previousChangeFrame === null) {
                 previousChangeFrame = framesWithChanges[framesWithChanges.length - 1];
@@ -2136,23 +1914,27 @@
                     }
                 }
             }
-            
+
             showFrame(previousChangeFrame);
-            
+
             // Show info about what's happening at this frame
             const rects = frameRectangles[previousChangeFrame] || [];
-            const additions = rects.filter(r => !r.isRemovalMarker).length;
+            const additions = rects.filter(r => !r.isRemovalMarker && !r.rectangleMoved && !r.rectangleResized).length;
             const deletions = rects.filter(r => r.isRemovalMarker).length;
-            
+            const moved = rects.filter(r => r.rectangleMoved).length;
+            const resized = rects.filter(r => r.rectangleResized).length;
+
             let message = `Previous change: Frame ${previousChangeFrame + 1}`;
-            if (additions > 0 && deletions > 0) {
-                message += ` (${additions} added, ${deletions} deleted)`;
-            } else if (additions > 0) {
-                message += ` (${additions} rectangle${additions === 1 ? '' : 's'} added)`;
-            } else if (deletions > 0) {
-                message += ` (${deletions} rectangle${deletions === 1 ? '' : 's'} deleted)`;
+            let changeInfo = [];
+            if (additions > 0) changeInfo.push(`${additions} addition${additions > 1 ? 's' : ''}`);
+            if (deletions > 0) changeInfo.push(`${deletions} deletion${deletions > 1 ? 's' : ''}`);
+            if (moved > 0) changeInfo.push(`${moved} moved${moved > 1 ? 's' : ''}`);
+            if (resized > 0) changeInfo.push(`${resized} resized${resized > 1 ? 's' : ''}`);
+
+            if (changeInfo.length > 0) {
+                message += ` (${changeInfo.join(', ')})`;
             }
-            
+
             showToast(message, 'info', 3000);
         }
 
@@ -2161,14 +1943,14 @@
                 showStatus('No video loaded', 'error');
                 return;
             }
-            
+
             const framesWithChanges = getFramesWithChanges();
-            
+
             if (framesWithChanges.length === 0) {
                 showStatus('No rectangle changes found', 'error');
                 return;
             }
-            
+
             // Find the next frame with changes after current frame
             let nextChangeFrame = null;
             for (let frameNum of framesWithChanges) {
@@ -2177,7 +1959,7 @@
                     break;
                 }
             }
-            
+
             // If no changes found after current frame, wrap to the first change
             if (nextChangeFrame === null) {
                 nextChangeFrame = framesWithChanges[0];
@@ -2192,18 +1974,22 @@
                     }
                 }
             }
-            
+
             showFrame(nextChangeFrame);
-            
+
             // Show info about what's happening at this frame
             const rects = frameRectangles[nextChangeFrame] || [];
-            const additions = rects.filter(r => !r.isRemovalMarker).length;
+            const additions = rects.filter(r => !r.isRemovalMarker && !r.rectangleMoved && !r.rectangleResized).length;
             const removals = rects.filter(r => r.isRemovalMarker).length;
-            
+            const moved = rects.filter(r => r.rectangleMoved).length;
+            const resized = rects.filter(r => r.rectangleResized).length;
+
             let changeInfo = [];
             if (additions > 0) changeInfo.push(`${additions} addition${additions > 1 ? 's' : ''}`);
             if (removals > 0) changeInfo.push(`${removals} removal${removals > 1 ? 's' : ''}`);
-            
+            if (moved > 0) changeInfo.push(`${moved} moved${moved > 1 ? 's' : ''}`);
+            if (resized > 0) changeInfo.push(`${resized} resized${resized > 1 ? 's' : ''}`);
+
             showStatus(`Frame ${nextChangeFrame + 1}: ${changeInfo.join(', ')}`, 'success');
         }
 
