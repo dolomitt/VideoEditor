@@ -9,6 +9,12 @@ from io import BytesIO
 import time
 import psutil
 import gc
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import uuid
+from threading import Lock
+import re
+import tempfile
 
 app = Flask(__name__)
 
@@ -18,6 +24,10 @@ EXPORT_FOLDER = 'exports'
 
 for folder in [UPLOAD_FOLDER, FRAMES_FOLDER, EXPORT_FOLDER]:
     os.makedirs(folder, exist_ok=True)
+
+# Job tracking system
+jobs = {}
+jobs_lock = Lock()
 
 @app.route('/')
 def index():
@@ -240,43 +250,209 @@ def process_frame_with_blur(frame_info):
     
     return frame_index
 
-@app.route('/export_blurred', methods=['POST'])
-def export_blurred():
-    data = request.json
-    video_name = data['video_name']
-    blur_radius = data.get('blur_radius', 5)  # Default to 5px blur radius
-    video_codec = data.get('video_codec', 'libx264')  # Default to libx264
+def process_frames_multithreaded(frame_tasks, job_id, max_workers=4):
+    """Process frames using multithreading with progress tracking"""
+    total_frames = len(frame_tasks)
+    processed_frames = 0
     
-    # Try multiple ways to get the frames data
-    frames_data = None
+    # Update job progress
+    with jobs_lock:
+        if job_id in jobs:
+            jobs[job_id]['progress'] = 0
+            jobs[job_id]['status'] = 'processing_frames'
+            jobs[job_id]['total_frames'] = total_frames
+            jobs[job_id]['processed_frames'] = 0
     
-    # First check if we have direct frames array
-    if 'frames' in data:
-        frames_data = data['frames']
-        print("Found frames data directly in request")
-    # Check if it's wrapped in all_frame_rectangles
-    elif 'all_frame_rectangles' in data:
-        all_frame_rectangles = data['all_frame_rectangles']
-        if isinstance(all_frame_rectangles, dict) and 'frames' in all_frame_rectangles:
-            frames_data = all_frame_rectangles['frames']
-            print("Found frames data in all_frame_rectangles.frames")
-        elif isinstance(all_frame_rectangles, list):
-            # Maybe it's already a list of frame events
-            frames_data = all_frame_rectangles
-            print("all_frame_rectangles is already a list")
+    print(f"Starting multithreaded frame processing with {max_workers} workers for {total_frames} frames...")
+    processing_start_time = time.time()
     
-    original_video_path = os.path.join(UPLOAD_FOLDER, video_name)
-    video_frames_folder = os.path.join(FRAMES_FOLDER, video_name.split('.')[0])
-    export_video_name = f'blurred_{video_name}'
-    export_video_path = os.path.join(EXPORT_FOLDER, export_video_name)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_frame = {executor.submit(process_frame_with_blur, task): task for task in frame_tasks}
+        
+        # Process completed tasks
+        for future in as_completed(future_to_frame):
+            # Check if job was cancelled
+            with jobs_lock:
+                if job_id in jobs and jobs[job_id]['cancelled']:
+                    print(f"Job {job_id} was cancelled, stopping frame processing")
+                    # Cancel remaining futures
+                    for f in future_to_frame:
+                        f.cancel()
+                    return False
+            
+            try:
+                frame_index = future.result()
+                processed_frames += 1
+                
+                # Update progress
+                progress_percent = (processed_frames / total_frames) * 100
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['progress'] = progress_percent
+                        jobs[job_id]['processed_frames'] = processed_frames
+                
+                # Log progress every 10 frames
+                if processed_frames % 10 == 0 or processed_frames == total_frames:
+                    elapsed = time.time() - processing_start_time
+                    fps = processed_frames / elapsed if elapsed > 0 else 0
+                    print(f"Processed {processed_frames}/{total_frames} frames ({progress_percent:.1f}%) | FPS: {fps:.2f}")
+                    
+            except Exception as e:
+                print(f"Error processing frame: {e}")
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['error'] = str(e)
+                        jobs[job_id]['status'] = 'error'
+                return False
     
-    # Performance monitoring
-    export_start_time = time.time()
-    process = psutil.Process()
-    initial_memory = process.memory_info().rss / 1024 / 1024  # MB
-    print(f"Starting export - Initial memory usage: {initial_memory:.2f} MB")
+    print(f"Completed processing {processed_frames} frames in {time.time() - processing_start_time:.2f}s")
+    return True
+
+def run_ffmpeg_with_progress(cmd, job_id, total_frames, fps):
+    """Run FFmpeg command with real-time progress monitoring"""
+    
+    # Create a temporary file for progress output
+    with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as progress_file:
+        progress_path = progress_file.name
     
     try:
+        # Add progress monitoring to FFmpeg command
+        cmd_with_progress = cmd.copy()
+        # Insert progress parameters before the output file
+        output_file = cmd_with_progress.pop()  # Remove output file
+        cmd_with_progress.extend(['-progress', progress_path, '-stats_period', '0.5'])
+        cmd_with_progress.append(output_file)  # Add output file back
+        
+        print(f"Executing FFmpeg with progress: {' '.join(cmd_with_progress)}")
+        
+        # Start FFmpeg process
+        process = subprocess.Popen(
+            cmd_with_progress,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # Monitor progress in a separate thread
+        def monitor_progress():
+            last_pos = 0
+            while process.poll() is None:
+                try:
+                    with open(progress_path, 'r') as f:
+                        f.seek(last_pos)
+                        content = f.read()
+                        last_pos = f.tell()
+                        
+                        if content:
+                            # Parse FFmpeg progress output
+                            lines = content.strip().split('\n')
+                            current_data = {}
+                            
+                            for line in lines:
+                                if '=' in line:
+                                    key, value = line.split('=', 1)
+                                    current_data[key] = value
+                                elif line == 'progress=end':
+                                    # Encoding finished
+                                    with jobs_lock:
+                                        if job_id in jobs:
+                                            jobs[job_id]['encoding_progress'] = 100
+                                            jobs[job_id]['progress'] = 98
+                                    break
+                            
+                            # Update progress based on current frame
+                            if 'frame' in current_data and current_data['frame'].isdigit():
+                                current_frame = int(current_data['frame'])
+                                encoding_progress = min(100, (current_frame / total_frames) * 100)
+                                
+                                # Get additional info
+                                speed = current_data.get('speed', 'N/A')
+                                bitrate = current_data.get('bitrate', 'N/A')
+                                
+                                with jobs_lock:
+                                    if job_id in jobs and not jobs[job_id]['cancelled']:
+                                        jobs[job_id]['encoding_progress'] = encoding_progress
+                                        jobs[job_id]['encoding_frame'] = current_frame
+                                        jobs[job_id]['encoding_speed'] = speed
+                                        jobs[job_id]['encoding_bitrate'] = bitrate
+                                        # Overall progress: 80% for frame processing + 18% for encoding
+                                        jobs[job_id]['progress'] = 80 + (encoding_progress * 0.18)
+                                
+                                print(f"Encoding progress: {encoding_progress:.1f}% ({current_frame}/{total_frames} frames) Speed: {speed}")
+                    
+                    time.sleep(0.5)  # Check every 500ms
+                    
+                except Exception as e:
+                    print(f"Error monitoring FFmpeg progress: {e}")
+                    break
+        
+        # Start progress monitoring thread
+        progress_thread = threading.Thread(target=monitor_progress)
+        progress_thread.daemon = True
+        progress_thread.start()
+        
+        # Wait for FFmpeg to complete
+        stdout, stderr = process.communicate()
+        
+        # Wait for progress thread to finish
+        progress_thread.join(timeout=2)
+        
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, cmd_with_progress, stderr)
+        
+        return stdout, stderr
+        
+    finally:
+        # Clean up temporary progress file
+        try:
+            os.unlink(progress_path)
+        except:
+            pass
+
+def export_blurred_async(job_id, data):
+    """Asynchronous export function that runs in a separate thread"""
+    try:
+        video_name = data['video_name']
+        blur_radius = data.get('blur_radius', 5)
+        video_codec = data.get('video_codec', 'libx264')
+        
+        with jobs_lock:
+            if job_id not in jobs:
+                return
+            jobs[job_id]['status'] = 'initializing'
+        
+        # Try multiple ways to get the frames data
+        frames_data = None
+        
+        # First check if we have direct frames array
+        if 'frames' in data:
+            frames_data = data['frames']
+            print("Found frames data directly in request")
+        # Check if it's wrapped in all_frame_rectangles
+        elif 'all_frame_rectangles' in data:
+            all_frame_rectangles = data['all_frame_rectangles']
+            if isinstance(all_frame_rectangles, dict) and 'frames' in all_frame_rectangles:
+                frames_data = all_frame_rectangles['frames']
+                print("Found frames data in all_frame_rectangles.frames")
+            elif isinstance(all_frame_rectangles, list):
+                # Maybe it's already a list of frame events
+                frames_data = all_frame_rectangles
+                print("all_frame_rectangles is already a list")
+        
+        original_video_path = os.path.join(UPLOAD_FOLDER, video_name)
+        video_frames_folder = os.path.join(FRAMES_FOLDER, video_name.split('.')[0])
+        export_video_name = f'blurred_{video_name}'
+        export_video_path = os.path.join(EXPORT_FOLDER, export_video_name)
+        
+        # Performance monitoring
+        export_start_time = time.time()
+        process = psutil.Process()
+        initial_memory = process.memory_info().rss / 1024 / 1024  # MB
+        print(f"Starting export - Initial memory usage: {initial_memory:.2f} MB")
+        
         # Create blurred frames for all frames that have rectangles
         blurred_frames_folder = os.path.join(FRAMES_FOLDER, f"{video_name.split('.')[0]}_blurred")
         os.makedirs(blurred_frames_folder, exist_ok=True)
@@ -463,39 +639,28 @@ def export_blurred():
             
             frame_tasks.append((original_frame_path, blurred_frame_path, ui_frame_index, precomputed_rectangles, blur_radius))
         
-        # Process frames sequentially (simple approach)
-        processed_frames = 0
-        
-        print(f"Starting sequential frame processing for {total_frames} frames...")
+        # Process frames with multithreading and progress tracking
         processing_start_time = time.time()
-        frame_times = []
         
-        # Process each frame one by one
-        for task in frame_tasks:
-            frame_start = time.time()
-            frame_index = process_frame_with_blur(task)
-            frame_time = time.time() - frame_start
-            frame_times.append(frame_time)
-            
-            processed_frames += 1
-            
-            # Performance monitoring every 10 frames
-            if processed_frames % 10 == 0 or processed_frames == total_frames:
-                current_memory = process.memory_info().rss / 1024 / 1024  # MB
-                avg_frame_time = sum(frame_times[-10:]) / min(10, len(frame_times))
-                elapsed = time.time() - processing_start_time
-                fps = processed_frames / elapsed if elapsed > 0 else 0
-                
-                print(f"Processed {processed_frames}/{total_frames} frames | "
-                      f"Memory: {current_memory:.2f} MB (Δ{current_memory - initial_memory:+.2f}) | "
-                      f"Avg frame time: {avg_frame_time:.3f}s | "
-                      f"FPS: {fps:.2f}")
-                
-                # Force garbage collection if memory usage is high
-                if current_memory - initial_memory > 500:  # 500MB increase
-                    gc.collect()
-                    new_memory = process.memory_info().rss / 1024 / 1024
-                    print(f"Forced garbage collection: {current_memory:.2f}MB → {new_memory:.2f}MB")
+        # Check if job was cancelled before starting
+        with jobs_lock:
+            if job_id in jobs and jobs[job_id]['cancelled']:
+                print(f"Job {job_id} was cancelled before frame processing")
+                return
+        
+        # Process frames using multithreading
+        success = process_frames_multithreaded(frame_tasks, job_id, max_workers=4)
+        
+        if not success:
+            with jobs_lock:
+                if job_id in jobs:
+                    if jobs[job_id]['cancelled']:
+                        jobs[job_id]['status'] = 'cancelled'
+                        jobs[job_id]['message'] = 'Export cancelled by user'
+                    else:
+                        jobs[job_id]['status'] = 'error'
+                        jobs[job_id]['message'] = 'Error during frame processing'
+            return
         
         # Get original video properties
         cmd = [
@@ -540,10 +705,16 @@ def export_blurred():
         
         cmd.append(export_video_path)
         
-        # Execute FFmpeg command
-        print(f"Executing FFmpeg command: {' '.join(cmd)}")
+        # Update job status for FFmpeg encoding
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'encoding'
+                jobs[job_id]['progress'] = 80
+                jobs[job_id]['encoding_progress'] = 0
+        
+        # Execute FFmpeg command with progress monitoring
         ffmpeg_start_time = time.time()
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        stdout, stderr = run_ffmpeg_with_progress(cmd, job_id, total_frames, eval(video_stream['r_frame_rate']))
         ffmpeg_time = time.time() - ffmpeg_start_time
         print(f"FFmpeg export completed in {ffmpeg_time:.2f}s")
         
@@ -556,30 +727,31 @@ def export_blurred():
         print(f"Frame processing time: {time.time() - processing_start_time - ffmpeg_time:.2f}s")
         print(f"FFmpeg encoding time: {ffmpeg_time:.2f}s")
         print(f"Memory usage: Initial={initial_memory:.2f}MB, Final={final_memory:.2f}MB, Peak increase={final_memory - initial_memory:.2f}MB")
-        print(f"Average FPS: {total_frames / (time.time() - processing_start_time - ffmpeg_time):.2f}")
         print("=================================\n")
         
         # Build success message
         audio_info = " (with audio)" if audio_stream else " (video only - no audio in original)"
         success_message = f'Video exported with blur effect{audio_info}: {export_video_name}'
         
-        return jsonify({
-            'export_path': export_video_path,
-            'filename': export_video_name,
-            'message': success_message,
-            'has_audio': bool(audio_stream),
-            'performance': {
-                'total_time': total_export_time,
-                'frame_processing_time': time.time() - processing_start_time - ffmpeg_time,
-                'ffmpeg_time': ffmpeg_time,
-                'memory_increase_mb': final_memory - initial_memory,
-                'average_fps': total_frames / (time.time() - processing_start_time - ffmpeg_time)
-            }
-        })
+        # Update job status to completed
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'completed'
+                jobs[job_id]['progress'] = 100
+                jobs[job_id]['export_path'] = export_video_path
+                jobs[job_id]['filename'] = export_video_name
+                jobs[job_id]['message'] = success_message
+                jobs[job_id]['has_audio'] = bool(audio_stream)
+                jobs[job_id]['total_time'] = total_export_time
         
     except subprocess.CalledProcessError as e:
         error_msg = e.stderr
         print(f"FFmpeg error: {error_msg}")
+        
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'FFmpeg error: {error_msg}'
         
         # If there's an audio-related error, try without audio
         if audio_stream and ('audio' in error_msg.lower() or 'stream' in error_msg.lower()):
@@ -599,22 +771,315 @@ def export_blurred():
                 
                 cmd_no_audio.append(export_video_path)
                 
-                result = subprocess.run(cmd_no_audio, capture_output=True, text=True, check=True)
+                stdout, stderr = run_ffmpeg_with_progress(cmd_no_audio, job_id, total_frames, eval(video_stream['r_frame_rate']))
                 
-                return jsonify({
-                    'export_path': export_video_path,
-                    'filename': export_video_name,
-                    'message': f'Video exported with blur effect (audio excluded due to compatibility issue): {export_video_name}',
-                    'has_audio': False,
-                    'warning': 'Audio could not be copied due to compatibility issues'
-                })
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['status'] = 'completed'
+                        jobs[job_id]['progress'] = 100
+                        jobs[job_id]['export_path'] = export_video_path
+                        jobs[job_id]['filename'] = export_video_name
+                        jobs[job_id]['message'] = f'Video exported with blur effect (audio excluded): {export_video_name}'
+                        jobs[job_id]['has_audio'] = False
+                        jobs[job_id]['warning'] = 'Audio could not be copied due to compatibility issues'
                 
             except subprocess.CalledProcessError as retry_error:
-                return jsonify({'error': f'FFmpeg error (retry failed): {retry_error.stderr}'}), 500
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['status'] = 'error'
+                        jobs[job_id]['error'] = f'FFmpeg error (retry failed): {retry_error.stderr}'
         
-        return jsonify({'error': f'FFmpeg error: {error_msg}'}), 500
     except Exception as e:
-        return jsonify({'error': f'Export error: {str(e)}'}), 500
+        print(f"Export error: {str(e)}")
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'Export error: {str(e)}'
+
+@app.route('/export_blurred', methods=['POST'])
+def export_blurred():
+    """Start an asynchronous export job"""
+    data = request.json
+    
+    # Generate unique job ID
+    job_id = str(uuid.uuid4())
+    
+    # Initialize job tracking
+    with jobs_lock:
+        jobs[job_id] = {
+            'id': job_id,
+            'status': 'starting',
+            'progress': 0,
+            'message': 'Starting export...',
+            'cancelled': False,
+            'created_at': time.time()
+        }
+    
+    # Start export in background thread
+    thread = threading.Thread(target=export_blurred_async, args=(job_id, data))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'job_id': job_id, 'message': 'Export started'})
+
+def preview_blurred_async(job_id, data):
+    """Asynchronous preview function that runs in a separate thread"""
+    try:
+        video_name = data['video_name']
+        blur_radius = data.get('blur_radius', 5)
+        video_codec = data.get('video_codec', 'libx264')
+        start_frame = data.get('start_frame', 0)
+        end_frame = data.get('end_frame', 199)
+        
+        # Limit preview to 200 frames max
+        if end_frame - start_frame > 199:
+            end_frame = start_frame + 199
+        
+        with jobs_lock:
+            if job_id not in jobs:
+                return
+            jobs[job_id]['status'] = 'initializing'
+        
+        print(f"Creating preview from frame {start_frame} to {end_frame} ({end_frame - start_frame + 1} frames)")
+        
+        # Get frames data
+        frames_data = data.get('frames', [])
+        
+        original_video_path = os.path.join(UPLOAD_FOLDER, video_name)
+        video_frames_folder = os.path.join(FRAMES_FOLDER, video_name.split('.')[0])
+        preview_video_name = f'preview_{video_name.split(".")[0]}_f{start_frame}-{end_frame}.mp4'
+        preview_video_path = os.path.join(EXPORT_FOLDER, preview_video_name)
+        
+        # Process frames similar to export but limited range
+        blurred_frames_folder = os.path.join(FRAMES_FOLDER, f"{video_name.split('.')[0]}_preview_blurred")
+        os.makedirs(blurred_frames_folder, exist_ok=True)
+        
+        # Get frame files in the range
+        all_frame_files = sorted([f for f in os.listdir(video_frames_folder) if f.startswith('frame_')])
+        
+        # Convert frame indices to 1-based FFmpeg numbering for file lookup
+        preview_frame_files = []
+        for i in range(start_frame, end_frame + 1):
+            ffmpeg_frame_number = i + 1  # Convert to 1-based indexing
+            frame_filename = f'frame_{ffmpeg_frame_number:06d}.jpg'
+            if frame_filename in all_frame_files:
+                preview_frame_files.append(frame_filename)
+        
+        print(f"Processing {len(preview_frame_files)} preview frames")
+        
+        # Process events similar to full export
+        active_rectangles = {}
+        frames_data.sort(key=lambda x: x['frame_number'])
+        
+        # Precompute active rectangles for each frame in preview range
+        precomputed_rectangles = {}
+        
+        # Process events
+        frame_idx = 0
+        for frame_data in frames_data:
+            frame_num = frame_data['frame_number']
+            
+            # Fill frames between last processed and current frame
+            while frame_idx < frame_num:
+                if frame_idx >= start_frame and frame_idx <= end_frame and active_rectangles:
+                    precomputed_rectangles[frame_idx] = active_rectangles.copy()
+                frame_idx += 1
+            
+            # Process events at this frame
+            for event in frame_data['events']:
+                event_type = event['eventType']
+                rect_id = event.get('rectangleId')
+                
+                if event_type == 'rectangleCreated':
+                    if all(key in event for key in ['x', 'y', 'width', 'height']):
+                        active_rectangles[rect_id] = {
+                            'x': event['x'],
+                            'y': event['y'],
+                            'width': event['width'],
+                            'height': event['height']
+                        }
+                
+                elif event_type == 'rectangleMoved':
+                    if rect_id in active_rectangles:
+                        if all(key in event for key in ['x', 'y', 'width', 'height']):
+                            active_rectangles[rect_id] = {
+                                'x': event['x'],
+                                'y': event['y'],
+                                'width': event['width'],
+                                'height': event['height']
+                            }
+                
+                elif event_type == 'rectangleDeleted':
+                    if rect_id in active_rectangles:
+                        del active_rectangles[rect_id]
+            
+            # Store state after processing events (only for preview range)
+            if frame_num >= start_frame and frame_num <= end_frame and active_rectangles:
+                precomputed_rectangles[frame_idx] = active_rectangles.copy()
+            
+            frame_idx = frame_num + 1
+        
+        # Fill remaining frames in preview range
+        while frame_idx <= end_frame:
+            if frame_idx >= start_frame and active_rectangles:
+                precomputed_rectangles[frame_idx] = active_rectangles.copy()
+            frame_idx += 1
+        
+        # Prepare frame processing tasks
+        frame_tasks = []
+        for frame_file in preview_frame_files:
+            original_frame_path = os.path.join(video_frames_folder, frame_file)
+            blurred_frame_path = os.path.join(blurred_frames_folder, frame_file)
+            
+            # Extract frame index from filename
+            ffmpeg_frame_number = int(frame_file.split('_')[1].split('.')[0])
+            ui_frame_index = ffmpeg_frame_number - 1
+            
+            # Only process if in range
+            if ui_frame_index >= start_frame and ui_frame_index <= end_frame:
+                frame_tasks.append((original_frame_path, blurred_frame_path, ui_frame_index, precomputed_rectangles, blur_radius))
+        
+        # Process frames with multithreading
+        success = process_frames_multithreaded(frame_tasks, job_id, max_workers=4)
+        
+        if not success:
+            with jobs_lock:
+                if job_id in jobs:
+                    if jobs[job_id]['cancelled']:
+                        jobs[job_id]['status'] = 'cancelled'
+                        jobs[job_id]['message'] = 'Preview cancelled by user'
+                    else:
+                        jobs[job_id]['status'] = 'error'
+                        jobs[job_id]['message'] = 'Error during frame processing'
+            return
+        
+        # Get video properties
+        cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', original_video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        info = json.loads(result.stdout)
+        
+        video_stream = next((s for s in info['streams'] if s['codec_type'] == 'video'), None)
+        audio_stream = next((s for s in info['streams'] if s['codec_type'] == 'audio'), None)
+        
+        if not video_stream:
+            return jsonify({'error': 'No video stream found'}), 400
+        
+        # Build FFmpeg command for preview
+        frame_pattern = os.path.join(blurred_frames_folder, 'frame_%06d.jpg')
+        
+        cmd = [
+            'ffmpeg', '-y',
+            '-framerate', str(eval(video_stream['r_frame_rate'])),
+            '-start_number', str(start_frame + 1),  # Start from the first preview frame
+            '-i', frame_pattern,
+        ]
+        
+        # Add audio if it exists (extract only the preview portion)
+        if audio_stream:
+            start_time = start_frame / eval(video_stream['r_frame_rate'])
+            duration = (end_frame - start_frame + 1) / eval(video_stream['r_frame_rate'])
+            cmd.extend(['-ss', str(start_time), '-t', str(duration), '-i', original_video_path])
+            cmd.extend(['-c:a', 'copy'])
+            cmd.extend(['-map', '0:v:0', '-map', '1:a:0'])
+        
+        # Video encoding settings
+        cmd.extend([
+            '-c:v', video_codec,
+            '-pix_fmt', video_stream.get('pix_fmt', 'yuv420p'),
+        ])
+        
+        # Limit frames for preview
+        cmd.extend(['-frames:v', str(len(preview_frame_files))])
+        
+        cmd.append(preview_video_path)
+        
+        # Update job status for FFmpeg encoding
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'encoding'
+                jobs[job_id]['progress'] = 80
+                jobs[job_id]['encoding_progress'] = 0
+        
+        # Execute FFmpeg command with progress monitoring
+        print(f"Executing preview FFmpeg command: {' '.join(cmd)}")
+        preview_frames = len(frame_tasks)
+        stdout, stderr = run_ffmpeg_with_progress(cmd, job_id, preview_frames, eval(video_stream['r_frame_rate']))
+        
+        # Update job status to completed
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'completed'
+                jobs[job_id]['progress'] = 100
+                jobs[job_id]['export_path'] = preview_video_path
+                jobs[job_id]['filename'] = preview_video_name
+                jobs[job_id]['message'] = f'Preview created with {len(frame_tasks)} frames'
+                jobs[job_id]['has_audio'] = bool(audio_stream)
+                jobs[job_id]['start_frame'] = start_frame
+                jobs[job_id]['end_frame'] = end_frame
+                jobs[job_id]['frame_count'] = len(frame_tasks)
+        
+    except subprocess.CalledProcessError as e:
+        print(f"FFmpeg error during preview: {e.stderr}")
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'FFmpeg error during preview: {e.stderr}'
+    except Exception as e:
+        print(f"Preview error: {str(e)}")
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'Preview error: {str(e)}'
+
+@app.route('/preview_blurred', methods=['POST'])
+def preview_blurred():
+    """Start an asynchronous preview job"""
+    data = request.json
+    
+    # Generate unique job ID
+    job_id = str(uuid.uuid4())
+    
+    # Initialize job tracking
+    with jobs_lock:
+        jobs[job_id] = {
+            'id': job_id,
+            'status': 'starting',
+            'progress': 0,
+            'message': 'Starting preview...',
+            'cancelled': False,
+            'created_at': time.time()
+        }
+    
+    # Start preview in background thread
+    thread = threading.Thread(target=preview_blurred_async, args=(job_id, data))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'job_id': job_id, 'message': 'Preview started'})
+
+@app.route('/export_progress/<job_id>')
+def get_export_progress(job_id):
+    """Get progress of an export job"""
+    with jobs_lock:
+        if job_id in jobs:
+            job = jobs[job_id].copy()
+            return jsonify(job)
+        else:
+            return jsonify({'error': 'Job not found'}), 404
+
+@app.route('/cancel_export/<job_id>', methods=['POST'])
+def cancel_export(job_id):
+    """Cancel an export job"""
+    with jobs_lock:
+        if job_id in jobs:
+            jobs[job_id]['cancelled'] = True
+            jobs[job_id]['status'] = 'cancelled'
+            print(f"Job {job_id} marked for cancellation")
+            return jsonify({'success': True, 'message': 'Job cancellation requested'})
+        else:
+            return jsonify({'error': 'Job not found'}), 404
 
 @app.route('/save_rectangles', methods=['POST'])
 def save_rectangles():

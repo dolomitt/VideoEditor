@@ -81,23 +81,42 @@
             </div>
 
             <div class="controls">
-                <button onclick="clearRectangles()">Clear All Rectangles</button>
-                <button onclick="loadExistingRectangles()">Load Rectangles</button>
-                <button onclick="saveRectangles()">Save Rectangle Data</button>
-
-                <div class="codec-selector" style="display: inline-block; margin: 0 10px;">
-                    <label for="codecSelect" style="margin-right: 5px;">Video Codec:</label>
-                    <select id="codecSelect" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
-                        <option value="libx264">libx264 (Software)</option>
-                        <option value="h264_nvenc">h264_nvenc (NVIDIA GPU)</option>
-                    </select>
+                <!-- First row: Navigation and info -->
+                <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
+                    <button onclick="navigateToPreviousChange()">← Previous Change</button>
+                    <button onclick="navigateToNextChange()">Next Change →</button>
+                    <span id="frameInfo" style="font-weight: bold;"></span>
+                    <span id="frameSizeInfo" style="color: #999; font-size: 12px;"></span>
                 </div>
-
-                <button onclick="exportBlurred()">Export Video with Blur</button>
-                <button onclick="navigateToPreviousChange()">← Previous Change</button>
-                <button onclick="navigateToNextChange()">Next Change →</button>
-                <span id="frameInfo" style="margin-left: 20px; font-weight: bold;"></span>
-                <span id="frameSizeInfo" style="margin-left: 20px; color: #999; font-size: 12px;"></span>
+                
+                <!-- Second row: Action buttons and codec selector -->
+                <div style="display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;">
+                    <button onclick="clearRectangles()">Clear All Rectangles</button>
+                    <button onclick="loadExistingRectangles()">Load Rectangles</button>
+                    <button onclick="saveRectangles()">Save Rectangle Data</button>
+                    
+                    <div class="codec-selector" style="display: inline-flex; align-items: center;">
+                        <label for="codecSelect" style="margin-right: 5px;">Video Codec:</label>
+                        <select id="codecSelect" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="libx264">libx264 (Software)</option>
+                            <option value="h264_nvenc" selected>h264_nvenc (NVIDIA GPU)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="blur-selector" style="display: inline-flex; align-items: center;">
+                        <label for="blurAmount" style="margin-right: 5px;">Blur Amount:</label>
+                        <select id="blurAmount" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
+                            <option value="5">Light (5px)</option>
+                            <option value="10">Medium (10px)</option>
+                            <option value="15" selected>Heavy (15px)</option>
+                            <option value="20">Very Heavy (20px)</option>
+                            <option value="30">Extreme (30px)</option>
+                        </select>
+                    </div>
+                    
+                    <button onclick="previewBlurred()" style="background-color: #28a745; color: white;">Preview Blur (200 frames)</button>
+                    <button onclick="exportBlurred()">Export Video with Blur</button>
+                </div>
             </div>
 
         </div>
@@ -109,10 +128,10 @@
                     <label for="thumbnailInterval" style="margin-right: 8px; font-size: 14px;">Thumbnail every:</label>
                     <select id="thumbnailInterval" onchange="updateTimeline()"
                         style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px;">
-                        <option value="5" selected>5 seconds</option>
+                        <option value="5">5 seconds</option>
                         <option value="10">10 seconds</option>
                         <option value="20">20 seconds</option>
-                        <option value="30">30 seconds</option>
+                        <option value="30" selected>30 seconds</option>
                     </select>
                 </div>
             </div>
@@ -217,9 +236,9 @@
             const container = document.getElementById('timelineFrames');
             container.innerHTML = '';
 
-            // Get selected interval or default to 5 seconds
+            // Get selected interval or default to 30 seconds
             const intervalSelect = document.getElementById('thumbnailInterval');
-            const intervalSeconds = intervalSelect ? parseFloat(intervalSelect.value) : 5;
+            const intervalSeconds = intervalSelect ? parseFloat(intervalSelect.value) : 30;
 
             // Calculate frame interval based on selected time interval
             const frameInterval = Math.max(1, Math.round(intervalSeconds * videoFPS));
@@ -540,8 +559,18 @@
                             height: rectData.height
                         };
 
-                        frameRectangles[currentFrameIndex].push(movedRect);
-                        console.log('Created rectangleMoved event:', movedRect);
+                        // Check for existing move event for this rectangleId
+                        const existingMoveIndex = frameRectangles[currentFrameIndex].findIndex(r => r.rectangleMoved === originalRectId);
+                        
+                        if (existingMoveIndex >= 0) {
+                            // Update existing move event
+                            frameRectangles[currentFrameIndex][existingMoveIndex] = movedRect;
+                            console.log('Updated existing rectangleMoved event:', movedRect);
+                        } else {
+                            // Create new move event
+                            frameRectangles[currentFrameIndex].push(movedRect);
+                            console.log('Created new rectangleMoved event:', movedRect);
+                        }
                         showStatus(`Rectangle moved from frame ${parseInt(originalRectId.split('_')[0]) + 1} to frame ${currentFrameIndex + 1}`, 'success');
                     } else {
                         // Update rectangle that was created on current frame
@@ -643,8 +672,18 @@
                             rectangleResized: originalRectId // Reference to the original rectangle
                         };
 
-                        frameRectangles[currentFrameIndex].push(resizedRect);
-                        console.log('Created rectangleResized entry:', resizedRect);
+                        // Check for existing resize event for this rectangleId
+                        const existingResizeIndex = frameRectangles[currentFrameIndex].findIndex(r => r.rectangleResized === originalRectId);
+                        
+                        if (existingResizeIndex >= 0) {
+                            // Update existing resize event
+                            frameRectangles[currentFrameIndex][existingResizeIndex] = resizedRect;
+                            console.log('Updated existing rectangleResized event:', resizedRect);
+                        } else {
+                            // Create new resize event
+                            frameRectangles[currentFrameIndex].push(resizedRect);
+                            console.log('Created new rectangleResized event:', resizedRect);
+                        }
                         showStatus(`Rectangle resized from frame ${parseInt(originalRectId.split('_')[0]) + 1}`, 'success');
                     } else {
                         // Update rectangle that was created on current frame
@@ -722,29 +761,50 @@
                     newWidth = currentX - rectData.x;
                     newHeight = rectData.y + rectData.height - currentY;
                     newY = currentY;
+                    // Preserve X position
+                    newX = rectData.x;
                     break;
                 case 'sw':
                     newWidth = rectData.x + rectData.width - currentX;
                     newHeight = currentY - rectData.y;
                     newX = currentX;
+                    // Preserve Y position
+                    newY = rectData.y;
                     break;
                 case 'se':
                     newWidth = currentX - rectData.x;
                     newHeight = currentY - rectData.y;
+                    // Preserve X and Y position
+                    newX = rectData.x;
+                    newY = rectData.y;
                     break;
                 case 'n':
                     newHeight = rectData.y + rectData.height - currentY;
                     newY = currentY;
+                    // Preserve X and width
+                    newX = rectData.x;
+                    newWidth = rectData.width;
                     break;
                 case 's':
                     newHeight = currentY - rectData.y;
+                    // Preserve X, Y and width
+                    newX = rectData.x;
+                    newY = rectData.y;
+                    newWidth = rectData.width;
                     break;
                 case 'w':
                     newWidth = rectData.x + rectData.width - currentX;
                     newX = currentX;
+                    // Preserve Y and height
+                    newY = rectData.y;
+                    newHeight = rectData.height;
                     break;
                 case 'e':
                     newWidth = currentX - rectData.x;
+                    // Preserve X, Y and height
+                    newX = rectData.x;
+                    newY = rectData.y;
+                    newHeight = rectData.height;
                     break;
             }
 
@@ -995,6 +1055,35 @@
         }
 
         function handleRectangleDelete(rect, index) {
+            // Check if this rectangle has a move or resize event in the current frame
+            const currentFrameRects = frameRectangles[currentFrameIndex] || [];
+            const moveEventIndex = currentFrameRects.findIndex(r => r.rectangleMoved === rect.rectId);
+            const resizeEventIndex = currentFrameRects.findIndex(r => r.rectangleResized === rect.rectId);
+            
+            if (moveEventIndex >= 0) {
+                // Rectangle was moved in current frame - remove the move event
+                currentFrameRects.splice(moveEventIndex, 1);
+                if (currentFrameRects.length === 0) {
+                    delete frameRectangles[currentFrameIndex];
+                }
+                showToast(`Move event removed from frame ${currentFrameIndex + 1}`, 'success', 2000);
+                updateRectangles();
+                autoSaveRectangles();
+                return;
+            }
+            
+            if (resizeEventIndex >= 0) {
+                // Rectangle was resized in current frame - remove the resize event
+                currentFrameRects.splice(resizeEventIndex, 1);
+                if (currentFrameRects.length === 0) {
+                    delete frameRectangles[currentFrameIndex];
+                }
+                showToast(`Resize event removed from frame ${currentFrameIndex + 1}`, 'success', 2000);
+                updateRectangles();
+                autoSaveRectangles();
+                return;
+            }
+            
             if (rect.isFromCurrentFrame) {
                 // Rectangle was created on current frame - delete it entirely
                 const allCurrentRects = frameRectangles[currentFrameIndex] || [];
@@ -1151,6 +1240,7 @@
         }
 
         function startResizing(e, direction, index) {
+            e.preventDefault(); // Prevent text selection and other default behaviors
             isResizing = true;
             resizeHandle = direction;
             selectedRect.index = index;
@@ -1455,13 +1545,284 @@
             }
         }
 
-        function cancelExport() {
-            if (exportAbortController) {
-                exportAbortController.abort();
+        function startProgressPolling() {
+            if (progressPollingInterval) {
+                clearInterval(progressPollingInterval);
             }
-            hideExportModal();
-            showToast('Export cancelled by user', 'warning');
+            
+            progressPollingInterval = setInterval(async () => {
+                if (!currentJobId) return;
+                
+                try {
+                    const response = await fetch(`/export_progress/${currentJobId}`);
+                    const job = await response.json();
+                    
+                    if (job.error) {
+                        console.error('Error polling progress:', job.error);
+                        return;
+                    }
+                    
+                    // Update UI based on job status
+                    updateProgressFromJob(job);
+                    
+                    // Stop polling if job is finished
+                    if (job.status === 'completed' || job.status === 'error' || job.status === 'cancelled') {
+                        clearInterval(progressPollingInterval);
+                        progressPollingInterval = null;
+                        handleJobCompletion(job);
+                    }
+                    
+                } catch (error) {
+                    console.error('Error polling progress:', error);
+                }
+            }, 1000); // Poll every second
         }
+        
+        function updateProgressFromJob(job) {
+            const status = job.status;
+            let progress = job.progress || 0;
+            
+            if (status === 'initializing') {
+                updateExportStep('step2', 'active');
+                updateExportProgress(20, 'Initializing frame processing...');
+            } else if (status === 'processing_frames') {
+                updateExportStep('step2', 'active');
+                const processed = job.processed_frames || 0;
+                const total = job.total_frames || 1;
+                updateExportProgress(20 + (progress * 0.6), `Processing frames with blur... (${processed}/${total} - ${Math.round(progress)}%)`);
+            } else if (status === 'encoding') {
+                updateExportStep('step2', 'completed');
+                updateExportStep('step3', 'completed', 'Frames processed');
+                updateExportStep('step4', 'active');
+                
+                // Show detailed encoding progress
+                const encodingProgress = job.encoding_progress || 0;
+                const encodingFrame = job.encoding_frame || 0;
+                const totalFrames = job.total_frames || job.frame_count || 1;
+                const speed = job.encoding_speed || 'N/A';
+                const bitrate = job.encoding_bitrate || 'N/A';
+                
+                let encodingMessage = `Encoding final video... (${Math.round(encodingProgress)}%)`;
+                if (encodingFrame > 0) {
+                    encodingMessage = `Encoding video: ${encodingFrame}/${totalFrames} frames (${Math.round(encodingProgress)}%) Speed: ${speed}`;
+                }
+                
+                updateExportProgress(progress, encodingMessage);
+            }
+        }
+        
+        function handleJobCompletion(job) {
+            if (job.status === 'completed') {
+                updateExportStep('step2', 'completed');
+                updateExportStep('step3', 'completed', 'Audio track included');
+                updateExportStep('step4', 'completed');
+                updateExportProgress(100, 'Export completed!');
+                
+                // Update audio status
+                const audioStatus = job.has_audio ? 'Included' : 'Not available';
+                updateExportDetails(undefined, undefined, audioStatus);
+                
+                document.getElementById('cancelExport').disabled = true;
+                
+                setTimeout(() => {
+                    hideExportModal();
+                    // Different message for preview vs full export
+                    const isPreview = job.filename && job.filename.startsWith('preview_');
+                    const defaultMessage = isPreview ? 'Preview completed successfully!' : 'Export completed successfully!';
+                    showToast(job.message || defaultMessage, 'success', 8000);
+                    currentJobId = null;
+                }, 2000);
+                
+            } else if (job.status === 'error') {
+                updateExportStep('step2', 'error');
+                updateExportStep('step3', 'error');
+                updateExportStep('step4', 'error');
+                updateExportProgress(0, 'Export failed');
+                
+                setTimeout(() => {
+                    hideExportModal();
+                    showToast(job.error || 'Export failed', 'error');
+                    currentJobId = null;
+                }, 2000);
+                
+            } else if (job.status === 'cancelled') {
+                updateExportStep('step2', 'error');
+                updateExportStep('step3', 'error');
+                updateExportStep('step4', 'error');
+                updateExportProgress(0, 'Export cancelled');
+                
+                setTimeout(() => {
+                    hideExportModal();
+                    showToast('Export cancelled by user', 'warning');
+                    currentJobId = null;
+                }, 1000);
+            }
+        }
+
+        async function cancelExport() {
+            if (currentJobId) {
+                try {
+                    await fetch(`/cancel_export/${currentJobId}`, { method: 'POST' });
+                    // The polling will handle the UI update when it detects cancellation
+                } catch (error) {
+                    console.error('Error cancelling export:', error);
+                    hideExportModal();
+                    showToast('Error cancelling export', 'error');
+                }
+            } else {
+                hideExportModal();
+                showToast('Export cancelled', 'warning');
+            }
+        }
+
+        async function previewBlurred() {
+            // Find first frame with rectangles
+            const framesWithRects = getFramesWithChanges();
+            if (framesWithRects.length === 0) {
+                showToast('No rectangles found to preview', 'error');
+                return;
+            }
+
+            const startFrame = framesWithRects[0];
+            const endFrame = Math.min(startFrame + 200, totalFrames - 1);
+
+            showToast(`Creating preview from frame ${startFrame + 1} to ${endFrame + 1} (${endFrame - startFrame + 1} frames)`, 'info', 3000);
+
+            // Show the export modal
+            showExportModal();
+
+            // Step 1: Analyze and build export data (same as export but limited frames)
+            updateExportStep('step1', 'active');
+            updateExportProgress(10, 'Analyzing rectangles for preview...');
+
+            // Create export data in JSON events format to preserve rectangleId tracking
+            const exportData = {
+                frames: []
+            };
+            
+            // Convert frameRectangles to structured event format (only for preview range)
+            let totalRectangles = 0;
+            for (const [frameIndex, rectangles] of Object.entries(frameRectangles)) {
+                const frameNum = parseInt(frameIndex);
+                if (frameNum < startFrame || frameNum > endFrame) continue; // Skip frames outside preview range
+                if (!rectangles || rectangles.length === 0) continue;
+                
+                const frameData = {
+                    frame_number: frameNum,
+                    events: []
+                };
+                
+                for (const rect of rectangles) {
+                    if (rect.isRemovalMarker) {
+                        frameData.events.push({
+                            eventType: 'rectangleDeleted',
+                            rectangleId: rect.removesRect
+                        });
+                    } else if (rect.rectangleMoved) {
+                        frameData.events.push({
+                            eventType: 'rectangleMoved',
+                            rectangleId: rect.rectangleMoved,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    } else if (rect.rectangleResized) {
+                        frameData.events.push({
+                            eventType: 'rectangleResized',
+                            rectangleId: rect.rectangleResized,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    } else if (rect.hasOwnProperty('x') && rect.rectangleId) {
+                        frameData.events.push({
+                            eventType: 'rectangleCreated',
+                            rectangleId: rect.rectangleId,
+                            x: rect.x,
+                            y: rect.y,
+                            width: rect.width,
+                            height: rect.height
+                        });
+                        totalRectangles++;
+                    }
+                }
+                
+                if (frameData.events.length > 0) {
+                    exportData.frames.push(frameData);
+                }
+            }
+
+            const framesWithRectsInRange = exportData.frames.length;
+            updateExportDetails(framesWithRectsInRange, totalRectangles, 'Checking...');
+
+            updateExportStep('step1', 'completed');
+            updateExportProgress(25, 'Sending preview request...');
+
+            try {
+                // Create AbortController for cancellation
+                exportAbortController = new AbortController();
+
+                // Get selected codec and blur amount
+                const codecSelect = document.getElementById('codecSelect');
+                const selectedCodec = codecSelect.value;
+                const blurSelect = document.getElementById('blurAmount');
+                const selectedBlur = parseInt(blurSelect.value);
+
+                // Start the preview job
+                const response = await fetch('/preview_blurred', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        video_name: currentVideo,
+                        frames: exportData.frames,
+                        blur_radius: selectedBlur,
+                        video_codec: selectedCodec,
+                        start_frame: startFrame,
+                        end_frame: endFrame
+                    })
+                });
+
+                const startResult = await response.json();
+                
+                if (startResult.error) {
+                    updateExportStep('step1', 'error');
+                    updateExportProgress(0, 'Failed to start preview');
+                    setTimeout(() => {
+                        hideExportModal();
+                        showToast(`Preview error: ${startResult.error}`, 'error');
+                    }, 2000);
+                    return;
+                }
+
+                // Store job ID and start polling
+                currentJobId = startResult.job_id;
+                updateExportStep('step1', 'completed');
+                updateExportProgress(15, 'Preview job started...');
+
+                // Start polling for progress
+                startProgressPolling();
+            } catch (error) {
+                updateExportStep('step1', 'error');
+                updateExportStep('step2', 'error');
+                updateExportStep('step3', 'error');
+                updateExportStep('step4', 'error');
+                updateExportProgress(0, 'Preview failed');
+
+                setTimeout(() => {
+                    hideExportModal();
+                    showToast('Error starting preview: ' + error.message, 'error');
+                }, 2000);
+            }
+        }
+
+        let currentJobId = null;
+        let progressPollingInterval = null;
 
         async function exportBlurred() {
             // Show the export modal
@@ -1552,13 +1913,13 @@
             updateExportProgress(25, 'Sending export request...');
 
             try {
-                // Create AbortController for cancellation
-                exportAbortController = new AbortController();
-
-                // Get selected codec
+                // Get selected codec and blur amount
                 const codecSelect = document.getElementById('codecSelect');
                 const selectedCodec = codecSelect.value;
+                const blurSelect = document.getElementById('blurAmount');
+                const selectedBlur = parseInt(blurSelect.value);
 
+                // Start the export job
                 const response = await fetch('/export_blurred', {
                     method: 'POST',
                     headers: {
@@ -1567,60 +1928,32 @@
                     body: JSON.stringify({
                         video_name: currentVideo,
                         frames: exportData.frames,  // Send in events format
-                        blur_radius: 15,  // Default Gaussian blur radius
+                        blur_radius: selectedBlur,  // Use selected blur amount
                         video_codec: selectedCodec  // Include selected codec
-                    }),
-                    signal: exportAbortController.signal
+                    })
                 });
 
-                // Step 2: Processing frames
-                updateExportStep('step2', 'active');
-                updateExportProgress(50, 'Processing frames with blur...');
-
-                // Step 3: Audio handling  
-                updateExportStep('step3', 'active');
-                updateExportProgress(75, 'Processing audio...');
-
-                const result = await response.json();
-
-                if (result.error) {
-                    updateExportStep('step2', 'error');
-                    updateExportStep('step3', 'error');
-                    updateExportStep('step4', 'error');
-                    updateExportProgress(0, 'Export failed');
+                const startResult = await response.json();
+                
+                if (startResult.error) {
+                    updateExportStep('step1', 'error');
+                    updateExportProgress(0, 'Failed to start export');
                     setTimeout(() => {
                         hideExportModal();
-                        showToast(`Export error: ${result.error}`, 'error');
+                        showToast(`Export error: ${startResult.error}`, 'error');
                     }, 2000);
-                } else {
-                    // Mark steps as completed
-                    updateExportStep('step2', 'completed');
-                    updateExportStep('step3', 'completed', 'Audio track copied');
-                    updateExportStep('step4', 'active');
-                    updateExportProgress(90, 'Finalizing export...');
-
-                    // Update audio status based on result
-                    const audioStatus = result.has_audio ? 'Included' : 'Not available';
-                    updateExportDetails(undefined, undefined, audioStatus);
-
-                    // Complete
-                    setTimeout(() => {
-                        updateExportStep('step4', 'completed');
-                        updateExportProgress(100, 'Export completed!');
-                        document.getElementById('cancelExport').disabled = true;
-
-                        setTimeout(() => {
-                            hideExportModal();
-                            showToast(`${result.message}`, 'success', 8000);
-                        }, 2000);
-                    }, 500);
-                }
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    // Export was cancelled
                     return;
                 }
 
+                // Store job ID and start polling
+                currentJobId = startResult.job_id;
+                updateExportStep('step1', 'completed');
+                updateExportProgress(15, 'Export job started...');
+
+                // Start polling for progress
+                startProgressPolling();
+
+            } catch (error) {
                 updateExportStep('step1', 'error');
                 updateExportStep('step2', 'error');
                 updateExportStep('step3', 'error');
@@ -1629,7 +1962,7 @@
 
                 setTimeout(() => {
                     hideExportModal();
-                    showToast('Error exporting: ' + error.message, 'error');
+                    showToast('Error starting export: ' + error.message, 'error');
                 }, 2000);
             }
         }
@@ -2026,7 +2359,6 @@
             if (moved > 0) changeInfo.push(`${moved} moved${moved > 1 ? 's' : ''}`);
             if (resized > 0) changeInfo.push(`${resized} resized${resized > 1 ? 's' : ''}`);
 
-            showStatus(`Frame ${nextChangeFrame + 1}: ${changeInfo.join(', ')}`, 'success');
         }
 
         document.addEventListener('keydown', function (e) {
