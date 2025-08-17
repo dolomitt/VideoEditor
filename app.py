@@ -174,7 +174,7 @@ def get_frame(video_name, frame_index):
         return send_file(frame_path)
     return "Frame not found", 404
 
-def apply_gaussian_blur(image, blur_radius=2):
+def apply_gaussian_blur(image, blur_radius=1):
     """Apply Gaussian blur effect to an image region"""
     return image.filter(ImageFilter.GaussianBlur(radius=blur_radius))
 
@@ -245,6 +245,7 @@ def export_blurred():
     data = request.json
     video_name = data['video_name']
     blur_radius = data.get('blur_radius', 5)  # Default to 5px blur radius
+    video_codec = data.get('video_codec', 'libx264')  # Default to libx264
     
     # Try multiple ways to get the frames data
     frames_data = None
@@ -527,9 +528,9 @@ def export_blurred():
         else:
             print("No audio stream found in original video")
         
-        # Video encoding settings to match original
+        # Video encoding settings - use selected codec
         cmd.extend([
-            '-c:v', video_stream.get('codec_name', 'libx264'),  # Use original codec or default to h264
+            '-c:v', video_codec,  # Use selected codec
             '-pix_fmt', video_stream.get('pix_fmt', 'yuv420p'),  # Use original pixel format
         ])
         
@@ -589,7 +590,7 @@ def export_blurred():
                     'ffmpeg', '-y',
                     '-framerate', str(eval(video_stream['r_frame_rate'])),
                     '-i', frame_pattern,
-                    '-c:v', video_stream.get('codec_name', 'libx264'),
+                    '-c:v', video_codec,  # Use selected codec
                     '-pix_fmt', video_stream.get('pix_fmt', 'yuv420p'),
                 ]
                 
