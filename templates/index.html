@@ -76,8 +76,29 @@
 
         <div class="current-frame" id="currentFrame" style="display: none;">
 
-            <div class="frame-display" id="frameDisplay">
-                <img class="frame-image" id="frameImage" src="" alt="Current frame">
+            <div class="frame-editor-layout">
+                <div class="frame-display" id="frameDisplay">
+                    <img class="frame-image" id="frameImage" src="" alt="Current frame">
+                </div>
+                
+                <div class="property-box" id="propertyBox">
+                    <h3>Rectangle Properties</h3>
+                    <div class="property-table-container">
+                        <table class="property-table">
+                            <thead>
+                                <tr>
+                                    <th>Property</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="propertyTableBody">
+                                <tr class="no-selection">
+                                    <td colspan="2">No rectangle selected</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
 
             <div class="controls">
@@ -407,6 +428,9 @@
                     r.classList.remove('selected');
                     r.querySelectorAll('.resize-handle').forEach(h => h.remove());
                 });
+                
+                // Update property table to show no selection
+                updatePropertyTable();
 
                 isDrawing = true;
                 const rect = frameDisplay.getBoundingClientRect();
@@ -631,6 +655,9 @@
                     }
                     isDragging = false;
 
+                    // Update property table with new coordinates
+                    updatePropertyTable();
+
                     // Auto-save after rectangle modification
                     console.log('Rectangle moved, triggering auto-save...');
                     autoSaveRectangles();
@@ -735,6 +762,9 @@
                     }
                     isResizing = false;
                     resizeHandle = null;
+
+                    // Update property table with new dimensions
+                    updatePropertyTable();
 
                     // Auto-save after rectangle modification
                     autoSaveRectangles();
@@ -1051,7 +1081,57 @@
                     }
                 }
             });
+            
+            // Clear property table since no rectangle is selected after frame update
+            updatePropertyTable();
             console.log(`=== END UPDATE RECTANGLES FOR FRAME ${currentFrameIndex} ===`);
+        }
+
+        function updatePropertyTable() {
+            const tableBody = document.getElementById('propertyTableBody');
+            tableBody.innerHTML = '';
+
+            // Check if there's a selected rectangle
+            if (!selectedRect || !selectedRect.rect) {
+                const row = document.createElement('tr');
+                row.className = 'no-selection';
+                row.innerHTML = '<td colspan="2">No rectangle selected</td>';
+                tableBody.appendChild(row);
+                return;
+            }
+
+            const rect = selectedRect.rect;
+            const index = selectedRect.index;
+            
+            // Get effect type based on blur amount selection
+            const blurSelect = document.getElementById('blurAmount');
+            const blurValue = blurSelect ? blurSelect.value : '15';
+            let effectType = 'Gaussian Blur';
+            if (blurValue <= 5) effectType = 'Light Blur';
+            else if (blurValue <= 10) effectType = 'Medium Blur';
+            else if (blurValue <= 15) effectType = 'Heavy Blur';
+            else if (blurValue <= 20) effectType = 'Very Heavy Blur';
+            else effectType = 'Extreme Blur';
+
+            // Create property rows
+            const properties = [
+                { label: 'Rectangle ID', value: rect.rectId || `rect_${index}` },
+                { label: 'X Position', value: `${Math.round(rect.x)}px` },
+                { label: 'Y Position', value: `${Math.round(rect.y)}px` },
+                { label: 'Width', value: `${Math.round(rect.width)}px` },
+                { label: 'Height', value: `${Math.round(rect.height)}px` },
+                { label: 'Effect Type', value: effectType },
+                { label: 'Blur Intensity', value: `${blurValue}px` }
+            ];
+
+            properties.forEach(prop => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="property-label">${prop.label}</td>
+                    <td class="property-value">${prop.value}</td>
+                `;
+                tableBody.appendChild(row);
+            });
         }
 
         function handleRectangleDelete(rect, index) {
@@ -1198,6 +1278,9 @@
             // Select new rectangle
             rectDiv.classList.add('selected');
             selectedRect = { element: rectDiv, index: index, rect: rect };
+
+            // Update property table with selected rectangle
+            updatePropertyTable();
 
             // Add resize handles
             addResizeHandles(rectDiv, index);
@@ -2379,6 +2462,16 @@
                 navigateToPreviousChange();
             }
         });
+
+        // Add event listener for blur amount changes to update property table
+        setTimeout(() => {
+            const blurSelect = document.getElementById('blurAmount');
+            if (blurSelect) {
+                blurSelect.addEventListener('change', () => {
+                    updatePropertyTable();
+                });
+            }
+        }, 100);
 
         loadVideos();
 
