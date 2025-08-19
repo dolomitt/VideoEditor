@@ -17,6 +17,45 @@ body {
 
 .video-selector {
     margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.cleanup-btn {
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+}
+
+.cleanup-btn:hover {
+    background-color: #c82333;
+}
+
+.load-video-btn {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+}
+
+.load-video-btn:hover {
+    background-color: #218838;
+}
+
+.load-video-btn:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
 }
 
 .current-frame {

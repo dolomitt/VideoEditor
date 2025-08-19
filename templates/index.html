@@ -114,7 +114,8 @@
             <select id="videoSelect">
                 <option value="">Choose a video...</option>
             </select>
-            <button onclick="loadVideo()">Load Video</button>
+            <button onclick="loadVideo()" class="load-video-btn">▶️ Load Video</button>
+            <button onclick="cleanupFrames()" class="cleanup-btn" title="Delete all extracted frame files to free disk space">🗑️ Cleanup Frames</button>
         </div>
 
         <div class="status" id="status"></div>
@@ -1357,39 +1358,46 @@
                 return;
             }
 
-            let isDragging = false;
+            let timelineDragging = false;
 
             // Click on track to jump to position
             track.addEventListener('click', (e) => {
                 if (e.target === handle) return; // Don't trigger on handle clicks
+                if (e.target.classList.contains('timeline-keyframe')) return; // Don't trigger on keyframe clicks
                 
                 const rect = track.getBoundingClientRect();
                 const clickX = e.clientX - rect.left;
                 const percentage = clickX / rect.width;
                 const targetFrame = Math.round(percentage * (totalFrames - 1));
                 
+                console.log('Timeline clicked:', { clickX, percentage, targetFrame });
                 showFrame(Math.max(0, Math.min(totalFrames - 1, targetFrame)));
             });
 
             // Handle dragging
             handle.addEventListener('mousedown', (e) => {
-                isDragging = true;
+                timelineDragging = true;
                 e.preventDefault();
+                console.log('Timeline drag started');
             });
 
             document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
+                if (!timelineDragging) return;
                 
                 const rect = track.getBoundingClientRect();
                 const mouseX = e.clientX - rect.left;
                 const percentage = Math.max(0, Math.min(1, mouseX / rect.width));
                 const targetFrame = Math.round(percentage * (totalFrames - 1));
                 
+                console.log('Timeline dragging:', { mouseX, percentage, targetFrame });
                 showFrame(Math.max(0, Math.min(totalFrames - 1, targetFrame)));
             });
 
             document.addEventListener('mouseup', () => {
-                isDragging = false;
+                if (timelineDragging) {
+                    console.log('Timeline drag ended');
+                }
+                timelineDragging = false;
             });
 
             // Update timeline when frames change
@@ -2713,6 +2721,155 @@
         }, 100);
 
         loadVideos();
+        checkFFmpegStatus();
+
+        // FFmpeg Status Check Function
+        async function checkFFmpegStatus() {
+            try {
+                showToast('Checking FFmpeg installation...', 'info', 2000);
+                
+                const response = await fetch('/check_ffmpeg');
+                const result = await response.json();
+                
+                if (result.available) {
+                    // Extract version number for cleaner display
+                    const versionMatch = result.version.match(/ffmpeg version ([\d\.\-\w]+)/i);
+                    const versionText = versionMatch ? versionMatch[1] : 'Unknown version';
+                    
+                    // Update codec dropdown with available encoders
+                    populateCodecDropdown(result.codec_options);
+                    
+                    // Show enhanced status message with hardware encoder info
+                    let statusMessage = `✅ FFmpeg ${versionText} - Ready for video processing`;
+                    if (result.hardware_count > 0) {
+                        statusMessage += ` (${result.hardware_count} hardware encoders detected)`;
+                    }
+                    
+                    showStatus(statusMessage, 'success');
+                    showToast('FFmpeg ready!', 'success', 2000);
+                } else {
+                    const errorMessage = `❌ FFmpeg not available: ${result.message}`;
+                    showStatus(errorMessage, 'error');
+                    showToast('FFmpeg missing!', 'error', 4000);
+                    
+                    // Show detailed error in console for debugging
+                    console.error('FFmpeg check failed:', result);
+                    
+                    // Show helpful message
+                    setTimeout(() => {
+                        showStatus('⚠️ Please install FFmpeg to use video processing features. Visit https://ffmpeg.org/download.html', 'error');
+                    }, 3000);
+                }
+            } catch (error) {
+                console.error('Error checking FFmpeg:', error);
+                showStatus('❌ Could not verify FFmpeg installation', 'error');
+                showToast('FFmpeg check failed', 'error', 3000);
+            }
+        }
+
+        // Populate Codec Dropdown Function
+        function populateCodecDropdown(codecOptions) {
+            console.log('populateCodecDropdown called with:', codecOptions);
+            const codecSelect = document.getElementById('codecSelect');
+            console.log('codecSelect element:', codecSelect);
+            
+            if (!codecSelect || !codecOptions) {
+                console.error('Missing codecSelect element or codecOptions:', {codecSelect, codecOptions});
+                return;
+            }
+
+            // Clear existing options
+            codecSelect.innerHTML = '';
+            console.log('Cleared existing options');
+
+            // Add codec options (don't set selected here, do it after all are added)
+            codecOptions.forEach((codec, index) => {
+                console.log(`Adding codec ${index}:`, codec);
+                const option = document.createElement('option');
+                option.value = codec.id;
+                option.textContent = codec.name;
+                codecSelect.appendChild(option);
+                console.log(`Added option: ${codec.name} (${codec.id})`);
+            });
+
+            // Auto-select preferred codec with priority: NVIDIA H.264 > other hardware > software
+            let selectedOption = null;
+            
+            // First priority: NVIDIA NVENC H.264
+            const nvencH264 = Array.from(codecSelect.options).find(option => option.value === 'h264_nvenc');
+            if (nvencH264) {
+                selectedOption = nvencH264;
+                console.log('Auto-selected NVIDIA NVENC H.264 (highest priority)');
+            }
+            
+            // Second priority: Other hardware encoders
+            if (!selectedOption) {
+                const hardwareOptions = Array.from(codecSelect.options).filter(option => {
+                    const codec = codecOptions.find(c => c.id === option.value);
+                    return codec && (codec.type === 'nvidia' || codec.type === 'intel' || codec.type === 'amd');
+                });
+                if (hardwareOptions.length > 0) {
+                    selectedOption = hardwareOptions[0];
+                    console.log(`Auto-selected first hardware encoder: ${selectedOption.textContent}`);
+                }
+            }
+            
+            // Third priority: Software encoder (fallback)
+            if (!selectedOption) {
+                const softwareOption = Array.from(codecSelect.options).find(option => option.value === 'libx264');
+                if (softwareOption) {
+                    selectedOption = softwareOption;
+                    console.log('Auto-selected software encoder (fallback)');
+                }
+            }
+            
+            // Apply selection
+            if (selectedOption) {
+                // Clear all selections first
+                Array.from(codecSelect.options).forEach(opt => opt.selected = false);
+                selectedOption.selected = true;
+                console.log(`Final selection: ${selectedOption.textContent} (${selectedOption.value})`);
+            }
+
+            console.log('Final codec dropdown options:', Array.from(codecSelect.options).map(opt => ({value: opt.value, text: opt.textContent, selected: opt.selected})));
+            console.log('Populated codec dropdown with options:', codecOptions);
+        }
+
+        // Cleanup Frames Function
+        async function cleanupFrames() {
+            if (!confirm('This will delete ALL extracted frame files for ALL videos to free disk space.\n\nYou will need to re-extract frames when loading videos again.\n\nAre you sure you want to continue?')) {
+                return;
+            }
+
+            try {
+                showToast('Cleaning up frame files...', 'info', 3000);
+                
+                const response = await fetch('/cleanup_frames');
+                const result = await response.json();
+                
+                if (result.error) {
+                    showStatus(`Cleanup failed: ${result.error}`, 'error');
+                } else {
+                    const message = `Successfully cleaned up ${result.folders_deleted} video folders and ${result.files_deleted} frame files. Freed ${result.size_freed} of disk space.`;
+                    showStatus(message, 'success');
+                    showToast(`Freed ${result.size_freed}`, 'success', 4000);
+                    
+                    // Reset current video state since frames are deleted
+                    if (currentVideo) {
+                        document.getElementById('currentFrame').style.display = 'none';
+                        document.getElementById('timeline').style.display = 'none';
+                        currentVideo = null;
+                        totalFrames = 0;
+                        currentFrameIndex = 0;
+                        frameRectangles = {};
+                        showStatus('Frames cleaned up. Please reload your video to continue editing.', 'info');
+                    }
+                }
+            } catch (error) {
+                console.error('Cleanup error:', error);
+                showStatus('Cleanup failed: ' + error.message, 'error');
+            }
+        }
     </script>
 </body>
 

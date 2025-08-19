@@ -323,6 +323,155 @@ def get_extraction_progress(job_id):
         else:
             return jsonify({'error': 'Job not found'}), 404
 
+@app.route('/check_ffmpeg')
+def check_ffmpeg():
+    """Check if FFmpeg is installed and accessible, and detect available hardware encoders"""
+    try:
+        # Try to run ffmpeg -version command
+        result = subprocess.run(['ffmpeg', '-version'], 
+                              capture_output=True, text=True, timeout=10)
+        
+        if result.returncode != 0:
+            return jsonify({
+                'available': False,
+                'error': result.stderr,
+                'message': 'FFmpeg command failed'
+            })
+        
+        # Parse version info from output
+        version_line = result.stdout.split('\n')[0]
+        
+        # Check for available encoders
+        encoders_result = subprocess.run(['ffmpeg', '-encoders'], 
+                                       capture_output=True, text=True, timeout=10)
+        
+        available_encoders = []
+        hardware_encoders = []
+        
+        if encoders_result.returncode == 0:
+            encoder_lines = encoders_result.stdout.split('\n')
+            
+            # Debug: Log all encoder lines containing nvenc
+            print("DEBUG: Searching for hardware encoders...")
+            nvenc_lines = [line for line in encoder_lines if 'nvenc' in line.lower()]
+            print(f"DEBUG: Found {len(nvenc_lines)} lines containing 'nvenc':")
+            for line in nvenc_lines:
+                print(f"  {line}")
+            
+            # Look for specific hardware encoders
+            encoder_checks = {
+                'h264_nvenc': {'name': 'NVIDIA NVENC H.264', 'type': 'nvidia'},
+                'hevc_nvenc': {'name': 'NVIDIA NVENC HEVC', 'type': 'nvidia'},
+                'h264_qsv': {'name': 'Intel QuickSync H.264', 'type': 'intel'},
+                'hevc_qsv': {'name': 'Intel QuickSync HEVC', 'type': 'intel'},
+                'h264_amf': {'name': 'AMD AMF H.264', 'type': 'amd'},
+                'hevc_amf': {'name': 'AMD AMF HEVC', 'type': 'amd'}
+            }
+            
+            for line in encoder_lines:
+                for encoder_id, encoder_info in encoder_checks.items():
+                    # Check if encoder is in the line and it's a video encoder
+                    if encoder_id in line and ('V' in line[:10]):  # More flexible video encoder check
+                        print(f"DEBUG: Found encoder {encoder_id} in line: {line}")
+                        available_encoders.append(encoder_id)
+                        hardware_encoders.append({
+                            'id': encoder_id,
+                            'name': encoder_info['name'],
+                            'type': encoder_info['type']
+                        })
+                        
+            print(f"DEBUG: Final available_encoders: {available_encoders}")
+            print(f"DEBUG: Final hardware_encoders: {hardware_encoders}")
+        
+        # Always include software encoder
+        codec_options = [
+            {'id': 'libx264', 'name': 'libx264 (Software CPU)', 'type': 'software', 'default': True}
+        ]
+        
+        # Add detected hardware encoders
+        codec_options.extend(hardware_encoders)
+        
+        return jsonify({
+            'available': True,
+            'version': version_line,
+            'message': 'FFmpeg is properly installed and accessible',
+            'available_encoders': available_encoders,
+            'codec_options': codec_options,
+            'hardware_count': len(hardware_encoders)
+        })
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'available': False,
+            'error': 'Command timeout',
+            'message': 'FFmpeg command timed out'
+        })
+    except FileNotFoundError:
+        return jsonify({
+            'available': False,
+            'error': 'FFmpeg not found in PATH',
+            'message': 'FFmpeg is not installed or not in system PATH'
+        })
+    except Exception as e:
+        return jsonify({
+            'available': False,
+            'error': str(e),
+            'message': f'Error checking FFmpeg: {str(e)}'
+        })
+
+@app.route('/cleanup_frames')
+def cleanup_frames():
+    """Clean up all extracted frame files to free disk space"""
+    try:
+        total_size = 0
+        deleted_folders = 0
+        deleted_files = 0
+        
+        # Get all video frame folders
+        if os.path.exists(FRAMES_FOLDER):
+            for item in os.listdir(FRAMES_FOLDER):
+                folder_path = os.path.join(FRAMES_FOLDER, item)
+                if os.path.isdir(folder_path):
+                    # Calculate folder size before deletion
+                    folder_size = 0
+                    file_count = 0
+                    for root, dirs, files in os.walk(folder_path):
+                        for file in files:
+                            file_path = os.path.join(root, file)
+                            if os.path.exists(file_path):
+                                folder_size += os.path.getsize(file_path)
+                                file_count += 1
+                    
+                    # Delete the folder
+                    shutil.rmtree(folder_path)
+                    total_size += folder_size
+                    deleted_files += file_count
+                    deleted_folders += 1
+                    print(f"Deleted frame folder: {folder_path} ({folder_size / (1024*1024):.1f} MB, {file_count} files)")
+        
+        # Format size for display
+        if total_size > 1024*1024*1024:  # GB
+            size_str = f"{total_size / (1024*1024*1024):.2f} GB"
+        elif total_size > 1024*1024:  # MB
+            size_str = f"{total_size / (1024*1024):.1f} MB"
+        elif total_size > 1024:  # KB
+            size_str = f"{total_size / 1024:.1f} KB"
+        else:
+            size_str = f"{total_size} bytes"
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned up {deleted_folders} video folders, {deleted_files} frame files',
+            'size_freed': size_str,
+            'bytes_freed': total_size,
+            'folders_deleted': deleted_folders,
+            'files_deleted': deleted_files
+        })
+        
+    except Exception as e:
+        print(f"Error during cleanup: {str(e)}")
+        return jsonify({'error': f'Cleanup failed: {str(e)}'}), 500
+
 @app.route('/force_extract_frames/<video_name>')
 def force_extract_frames(video_name):
     video_path = os.path.join(UPLOAD_FOLDER, video_name)
