@@ -115,45 +115,213 @@ def extract_frames(video_name):
                 'message': f'Using existing {len(frame_files)} frames'
             })
     
-    # Create folder if it doesn't exist
-    os.makedirs(video_frames_folder, exist_ok=True)
+    # Generate unique job ID for tracking progress
+    job_id = str(uuid.uuid4())
     
-    frame_pattern = os.path.join(video_frames_folder, 'frame_%06d.jpg')
+    # Initialize job tracking for frame extraction
+    with jobs_lock:
+        jobs[job_id] = {
+            'id': job_id,
+            'status': 'starting',
+            'progress': 0,
+            'message': 'Starting frame extraction...',
+            'video_name': video_name,
+            'total_frames': 0,
+            'extracted_frames': 0,
+            'created_at': time.time()
+        }
     
+    # Start extraction in background thread
+    thread = threading.Thread(target=extract_frames_async, args=(job_id, video_name, video_path, video_frames_folder))
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({'job_id': job_id, 'message': 'Frame extraction started'})
+
+def extract_frames_async(job_id, video_name, video_path, video_frames_folder):
+    """Asynchronous frame extraction with progress tracking"""
     try:
-        print(f"Extracting frames for {video_name}...")
-        cmd = [
-            'ffmpeg', '-i', video_path,
-            '-vf', 'fps=fps=30',  # Extract at 30 fps for smooth timeline
-            '-q:v', '2',  # High quality
-            '-y',  # Overwrite existing files
-            frame_pattern
+        # Get video duration and frame count first
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'analyzing'
+                jobs[job_id]['message'] = 'Analyzing video properties...'
+        
+        # Get video info for progress calculation
+        cmd_info = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', video_path
         ]
+        result = subprocess.run(cmd_info, capture_output=True, text=True, check=True)
+        info = json.loads(result.stdout)
         
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        video_stream = next((s for s in info['streams'] if s['codec_type'] == 'video'), None)
+        if video_stream:
+            duration = float(info['format']['duration'])
+            fps = eval(video_stream['r_frame_rate'])
+            total_frames = int(duration * 30)  # 30 fps extraction
+            
+            with jobs_lock:
+                if job_id in jobs:
+                    jobs[job_id]['total_frames'] = total_frames
+                    jobs[job_id]['message'] = f'Extracting {total_frames} frames...'
+        else:
+            total_frames = 1000  # Fallback estimate
         
-        frame_files = sorted([f for f in os.listdir(video_frames_folder) if f.startswith('frame_')])
-        frames_info = []
+        # Create folder if it doesn't exist
+        os.makedirs(video_frames_folder, exist_ok=True)
         
-        for i, filename in enumerate(frame_files):
-            frames_info.append({
-                'index': i,
-                'filename': filename,
-                'path': os.path.join(video_frames_folder, filename)
-            })
+        frame_pattern = os.path.join(video_frames_folder, 'frame_%06d.jpg')
         
-        print(f"Extracted {len(frame_files)} frames for {video_name}")
-        return jsonify({
-            'frames': frames_info, 
-            'total': len(frame_files),
-            'cached': False,
-            'message': f'Extracted {len(frame_files)} new frames'
-        })
+        # Create temporary file for FFmpeg progress
+        with tempfile.NamedTemporaryFile(mode='w+', delete=False, suffix='.txt') as progress_file:
+            progress_path = progress_file.name
         
+        try:
+            with jobs_lock:
+                if job_id in jobs:
+                    jobs[job_id]['status'] = 'extracting'
+                    jobs[job_id]['progress'] = 0
+            
+            print(f"Extracting frames for {video_name}...")
+            cmd = [
+                'ffmpeg', '-i', video_path,
+                '-vf', 'fps=fps=30',  # Extract at 30 fps for smooth timeline
+                '-q:v', '2',  # High quality
+                '-y',  # Overwrite existing files
+                '-progress', progress_path,  # Progress output
+                '-stats_period', '0.5',  # Update every 0.5 seconds
+                frame_pattern
+            ]
+            
+            # Start FFmpeg process
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                universal_newlines=True
+            )
+            
+            # Monitor progress in a separate thread
+            def monitor_progress():
+                last_pos = 0
+                while process.poll() is None:
+                    try:
+                        with open(progress_path, 'r') as f:
+                            f.seek(last_pos)
+                            content = f.read()
+                            last_pos = f.tell()
+                            
+                            if content:
+                                # Parse FFmpeg progress output
+                                lines = content.strip().split('\n')
+                                current_data = {}
+                                
+                                for line in lines:
+                                    if '=' in line:
+                                        key, value = line.split('=', 1)
+                                        current_data[key] = value
+                                    elif line == 'progress=end':
+                                        # Extraction finished
+                                        with jobs_lock:
+                                            if job_id in jobs:
+                                                jobs[job_id]['progress'] = 100
+                                                jobs[job_id]['status'] = 'completing'
+                                                jobs[job_id]['message'] = 'Finalizing frame extraction...'
+                                        break
+                                
+                                # Update progress based on current frame
+                                if 'frame' in current_data and current_data['frame'].isdigit():
+                                    current_frame = int(current_data['frame'])
+                                    progress = min(95, (current_frame / total_frames) * 100) if total_frames > 0 else 0
+                                    
+                                    # Get speed info
+                                    speed = current_data.get('speed', 'N/A')
+                                    
+                                    with jobs_lock:
+                                        if job_id in jobs:
+                                            jobs[job_id]['progress'] = progress
+                                            jobs[job_id]['extracted_frames'] = current_frame
+                                            jobs[job_id]['speed'] = speed
+                                            jobs[job_id]['message'] = f'Extracted {current_frame}/{total_frames} frames'
+                                    
+                                    print(f"Frame extraction progress: {progress:.1f}% ({current_frame}/{total_frames} frames) Speed: {speed}")
+                        
+                        time.sleep(0.5)  # Check every 500ms
+                        
+                    except Exception as e:
+                        print(f"Error monitoring frame extraction progress: {e}")
+                        break
+            
+            # Start progress monitoring thread
+            progress_thread = threading.Thread(target=monitor_progress)
+            progress_thread.daemon = True
+            progress_thread.start()
+            
+            # Wait for FFmpeg to complete
+            stdout, stderr = process.communicate()
+            
+            # Wait for progress thread to finish
+            progress_thread.join(timeout=2)
+            
+            if process.returncode != 0:
+                raise subprocess.CalledProcessError(process.returncode, cmd, stderr)
+            
+            # Count extracted frames
+            frame_files = sorted([f for f in os.listdir(video_frames_folder) if f.startswith('frame_')])
+            frames_info = []
+            
+            for i, filename in enumerate(frame_files):
+                frames_info.append({
+                    'index': i,
+                    'filename': filename,
+                    'path': os.path.join(video_frames_folder, filename)
+                })
+            
+            # Update job status to completed
+            with jobs_lock:
+                if job_id in jobs:
+                    jobs[job_id]['status'] = 'completed'
+                    jobs[job_id]['progress'] = 100
+                    jobs[job_id]['message'] = f'Successfully extracted {len(frame_files)} frames'
+                    jobs[job_id]['frames_info'] = frames_info
+                    jobs[job_id]['total'] = len(frame_files)
+            
+            print(f"Extracted {len(frame_files)} frames for {video_name}")
+            
+        finally:
+            # Clean up temporary progress file
+            try:
+                os.unlink(progress_path)
+            except:
+                pass
+                
     except subprocess.CalledProcessError as e:
-        return jsonify({'error': f'FFmpeg error: {e.stderr}'}), 500
-    except FileNotFoundError:
-        return jsonify({'error': 'FFmpeg not found. Please install FFmpeg.'}), 500
+        error_msg = e.stderr
+        print(f"FFmpeg error during frame extraction: {error_msg}")
+        
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'FFmpeg error: {error_msg}'
+                
+    except Exception as e:
+        print(f"Frame extraction error: {str(e)}")
+        with jobs_lock:
+            if job_id in jobs:
+                jobs[job_id]['status'] = 'error'
+                jobs[job_id]['error'] = f'Extraction error: {str(e)}'
+
+@app.route('/extraction_progress/<job_id>')
+def get_extraction_progress(job_id):
+    """Get progress of frame extraction job"""
+    with jobs_lock:
+        if job_id in jobs:
+            job = jobs[job_id].copy()
+            return jsonify(job)
+        else:
+            return jsonify({'error': 'Job not found'}), 404
 
 @app.route('/force_extract_frames/<video_name>')
 def force_extract_frames(video_name):

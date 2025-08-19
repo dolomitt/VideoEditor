@@ -12,6 +12,51 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <!-- Frame Extraction Progress Modal -->
+    <div class="extraction-modal" id="extractionModal" style="display: none;">
+        <div class="extraction-modal-content">
+            <h3>Extracting Video Frames</h3>
+            <div class="extraction-progress">
+                <div class="extraction-step" id="extractStep1">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Analyzing video properties...</span>
+                    <span class="step-status">pending</span>
+                </div>
+                <div class="extraction-step" id="extractStep2">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Extracting frames at 30 FPS...</span>
+                    <span class="step-status">pending</span>
+                </div>
+                <div class="extraction-step" id="extractStep3">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Finalizing frame extraction...</span>
+                    <span class="step-status">pending</span>
+                </div>
+            </div>
+            <div class="extraction-details" id="extractionDetails">
+                <div class="detail-item">
+                    <span class="detail-label">Total frames:</span>
+                    <span class="detail-value" id="totalFramesCount">Calculating...</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Extracted:</span>
+                    <span class="detail-value" id="extractedFramesCount">0</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Speed:</span>
+                    <span class="detail-value" id="extractionSpeed">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Progress:</span>
+                    <span class="detail-value" id="extractionProgressText">Starting...</span>
+                </div>
+            </div>
+            <div class="extraction-progress-bar">
+                <div class="progress-bar-fill" id="extractionProgressBarFill"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Export Progress Modal -->
     <div class="export-modal" id="exportModal" style="display: none;">
         <div class="export-modal-content">
@@ -206,43 +251,147 @@
                 return;
             }
 
-            showToast('Loading video info and frames...', 'info', 2000);
-
             try {
                 // First get video info to get FPS
                 const videoInfoResponse = await fetch(`/get_video_info/${currentVideo}`);
                 const videoInfo = await videoInfoResponse.json();
                 videoFPS = videoInfo.fps || 30; // Use actual FPS or default to 30
 
-                // Then extract frames
+                // Then extract frames (this returns immediately with job ID for new extractions)
                 const response = await fetch(`/extract_frames/${currentVideo}`);
                 const data = await response.json();
-                totalFrames = data.total;
 
-                createTimeline();
-                showFrame(0);
-
-                document.getElementById('currentFrame').style.display = 'block';
-                document.getElementById('timeline').style.display = 'block';
-
-                // Initialize frame size
-                setFrameSize('medium');
-
-                // Update frame size display after initial load
-                setTimeout(() => {
-                    updateFrameSizeDisplay();
-                }, 100);
-
-                // Show appropriate message based on whether frames were cached or extracted
-                const statusMessage = data.cached ?
-                    `Loaded ${totalFrames} frames (cached)` :
-                    `Extracted ${totalFrames} frames`;
-                showStatus(statusMessage, 'success');
-
-                // Load existing rectangles for this video
-                loadExistingRectangles();
+                if (data.cached) {
+                    // Frames already exist, load immediately
+                    totalFrames = data.total;
+                    finishVideoLoad(data);
+                } else if (data.job_id) {
+                    // Frame extraction started, show progress modal
+                    showExtractionProgress(data.job_id);
+                } else {
+                    throw new Error(data.error || 'Unknown error during frame extraction');
+                }
             } catch (error) {
-                showStatus('Error extracting frames: ' + error.message, 'error');
+                showStatus('Error loading video: ' + error.message, 'error');
+            }
+        }
+
+        function finishVideoLoad(data) {
+            createTimeline();
+            showFrame(0);
+
+            document.getElementById('currentFrame').style.display = 'block';
+            document.getElementById('timeline').style.display = 'block';
+
+            // Initialize frame size
+            setFrameSize('medium');
+
+            // Update frame size display after initial load
+            setTimeout(() => {
+                updateFrameSizeDisplay();
+            }, 100);
+
+            // Show appropriate message based on whether frames were cached or extracted
+            const statusMessage = data.cached ?
+                `Loaded ${totalFrames} frames (cached)` :
+                `Extracted ${totalFrames} frames`;
+            showStatus(statusMessage, 'success');
+
+            // Load existing rectangles for this video
+            loadExistingRectangles();
+        }
+
+        function showExtractionProgress(jobId) {
+            const modal = document.getElementById('extractionModal');
+            modal.style.display = 'flex';
+
+            // Reset progress elements
+            document.querySelectorAll('.extraction-step').forEach(step => {
+                step.classList.remove('active', 'completed');
+            });
+            document.getElementById('extractionProgressBarFill').style.width = '0%';
+            document.getElementById('totalFramesCount').textContent = 'Calculating...';
+            document.getElementById('extractedFramesCount').textContent = '0';
+            document.getElementById('extractionSpeed').textContent = '-';
+            document.getElementById('extractionProgressText').textContent = 'Starting...';
+
+            // Start polling for progress
+            monitorExtractionProgress(jobId);
+        }
+
+        async function monitorExtractionProgress(jobId) {
+            try {
+                const response = await fetch(`/extraction_progress/${jobId}`);
+                const job = await response.json();
+
+                if (job.error) {
+                    document.getElementById('extractionModal').style.display = 'none';
+                    showStatus('Error during frame extraction: ' + job.error, 'error');
+                    return;
+                }
+
+                // Update progress bar
+                const progressBar = document.getElementById('extractionProgressBarFill');
+                progressBar.style.width = job.progress + '%';
+
+                // Update details
+                if (job.total_frames) {
+                    document.getElementById('totalFramesCount').textContent = job.total_frames.toLocaleString();
+                }
+                if (job.extracted_frames) {
+                    document.getElementById('extractedFramesCount').textContent = job.extracted_frames.toLocaleString();
+                }
+                if (job.speed) {
+                    document.getElementById('extractionSpeed').textContent = job.speed;
+                }
+                document.getElementById('extractionProgressText').textContent = job.message || 'Processing...';
+
+                // Update step status
+                const steps = document.querySelectorAll('.extraction-step');
+                steps.forEach(step => step.classList.remove('active', 'completed'));
+
+                if (job.status === 'analyzing') {
+                    document.getElementById('extractStep1').classList.add('active');
+                } else if (job.status === 'extracting') {
+                    document.getElementById('extractStep1').classList.add('completed');
+                    document.getElementById('extractStep2').classList.add('active');
+                } else if (job.status === 'completing') {
+                    document.getElementById('extractStep1').classList.add('completed');
+                    document.getElementById('extractStep2').classList.add('completed');
+                    document.getElementById('extractStep3').classList.add('active');
+                }
+
+                if (job.status === 'completed') {
+                    // Extraction completed
+                    steps.forEach(step => step.classList.add('completed'));
+                    
+                    // Use the data from the completed job
+                    totalFrames = job.total;
+                    const completedData = {
+                        frames: job.frames_info,
+                        total: job.total,
+                        cached: false,
+                        message: job.message
+                    };
+
+                    // Hide modal after a short delay
+                    setTimeout(() => {
+                        document.getElementById('extractionModal').style.display = 'none';
+                        finishVideoLoad(completedData);
+                    }, 1000);
+
+                } else if (job.status === 'error') {
+                    // Error occurred
+                    document.getElementById('extractionModal').style.display = 'none';
+                    showStatus('Error during frame extraction: ' + (job.error || 'Unknown error'), 'error');
+                } else {
+                    // Continue polling
+                    setTimeout(() => monitorExtractionProgress(jobId), 500);
+                }
+
+            } catch (error) {
+                document.getElementById('extractionModal').style.display = 'none';
+                showStatus('Error monitoring extraction progress: ' + error.message, 'error');
             }
         }
 
@@ -1067,6 +1216,13 @@
                         handleRectangleDelete(rect, index);
                     };
                 }
+
+                // Add rectangle ID label in top left corner
+                const idLabel = document.createElement('div');
+                idLabel.className = 'rectangle-id-label';
+                idLabel.textContent = rect.rectId || `rect_${index}`;
+                idLabel.title = `Rectangle ID: ${rect.rectId || `rect_${index}`}`;
+                rectDiv.appendChild(idLabel);
 
                 rectDiv.appendChild(actionBtn);
                 frameDisplay.appendChild(rectDiv);
@@ -2138,105 +2294,27 @@
             showToast(message, type);
         }
 
-        async function autoLoadFirstVideo() {
-            try {
-                const response = await fetch('/get_first_video');
-
-                if (!response.ok) {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-                }
-
-                const data = await response.json();
-
-                if (data.video) {
-                    const select = document.getElementById('videoSelect');
-                    select.value = data.video;
-                    currentVideo = data.video;
-
-                    showToast('Auto-loading video...', 'info', 2000);
-
-                    // First get video info to get FPS
-                    const videoInfoResponse = await fetch(`/get_video_info/${currentVideo}`);
-                    const videoInfo = await videoInfoResponse.json();
-                    videoFPS = videoInfo.fps || 30; // Use actual FPS or default to 30
-
-                    const extractResponse = await fetch(`/extract_frames/${currentVideo}`);
-
-                    if (!extractResponse.ok) {
-                        throw new Error(`Failed to extract frames: HTTP ${extractResponse.status}`);
-                    }
-
-                    const extractData = await extractResponse.json();
-
-                    if (extractData.error) {
-                        throw new Error(extractData.error);
-                    }
-
-                    totalFrames = extractData.total;
-
-                    createTimeline();
-                    showFrame(0);
-
-                    document.getElementById('currentFrame').style.display = 'block';
-                    document.getElementById('timeline').style.display = 'block';
-
-                    // Initialize frame size
-                    setFrameSize('medium');
-
-                    // Show appropriate message based on whether frames were cached or extracted
-                    const statusMessage = extractData.cached ?
-                        `Auto-loaded ${currentVideo} with ${totalFrames} frames (cached)` :
-                        `Auto-loaded ${currentVideo} with ${totalFrames} frames (extracted)`;
-                    showStatus(statusMessage, 'success');
-
-                    // Load existing rectangles for this video
-                    loadExistingRectangles();
-                } else {
-                    console.log('No video found in data folder');
-                }
-            } catch (error) {
-                console.error('Auto-load error:', error);
-                showStatus('No video found to auto-load. Please add a video to the data folder.', 'error');
-            }
-        }
 
         function setFrameSize(size) {
             const frameDisplay = document.getElementById('frameDisplay');
-            const sizeInfo = document.getElementById('sizeInfo');
-            const sizeSlider = document.getElementById('sizeSlider');
-
-            // Remove active class from all buttons
-            document.querySelectorAll('.size-controls button').forEach(btn => btn.classList.remove('active'));
 
             let width, height;
             switch (size) {
                 case 'small':
                     width = '400px';
                     height = '300px';
-                    sizeSlider.value = 400;
-                    sizeInfo.textContent = '400px';
-                    document.getElementById('sizeSmall').classList.add('active');
                     break;
                 case 'medium':
                     width = '600px';
                     height = '450px';
-                    sizeSlider.value = 600;
-                    sizeInfo.textContent = '600px';
-                    document.getElementById('sizeMedium').classList.add('active');
                     break;
                 case 'large':
                     width = '800px';
                     height = '600px';
-                    sizeSlider.value = 800;
-                    sizeInfo.textContent = '800px';
-                    document.getElementById('sizeLarge').classList.add('active');
                     break;
                 case 'fit':
                     width = '90vw';
                     height = '70vh';
-                    sizeSlider.value = 1000;
-                    sizeInfo.textContent = 'Fit Screen';
-                    document.getElementById('sizeFit').classList.add('active');
                     break;
             }
 
@@ -2251,17 +2329,12 @@
 
         function setCustomSize(value) {
             const frameDisplay = document.getElementById('frameDisplay');
-            const sizeInfo = document.getElementById('sizeInfo');
-
-            // Remove active class from preset buttons
-            document.querySelectorAll('.size-controls button').forEach(btn => btn.classList.remove('active'));
 
             const width = value + 'px';
             const height = (value * 0.75) + 'px'; // Maintain 4:3 aspect ratio
 
             frameDisplay.style.width = width;
             frameDisplay.style.height = height;
-            sizeInfo.textContent = value + 'px';
 
             // Update frame size display after setting custom size
             setTimeout(() => {
@@ -2474,11 +2547,6 @@
         }, 100);
 
         loadVideos();
-
-        // Wait a moment for the DOM to be ready
-        setTimeout(() => {
-            autoLoadFirstVideo();
-        }, 500);
     </script>
 </body>
 
