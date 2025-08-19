@@ -79,6 +79,88 @@ body {
     background: #14a085;
 }
 
+/* Timeline Scrubber */
+.timeline-scrubber {
+    margin-top: 15px;
+    width: 100%;
+    position: relative;
+}
+
+.timeline-track {
+    position: relative;
+    width: 100%;
+    height: 8px;
+    background: #444;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid #555;
+}
+
+.timeline-progress {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #0d7377, #14a085);
+    border-radius: 4px;
+    transition: width 0.2s ease;
+    width: 0%;
+}
+
+.timeline-handle {
+    position: absolute;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border: 2px solid #0d7377;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    cursor: grab;
+    z-index: 15;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    transition: left 0.2s ease;
+}
+
+.timeline-handle:active {
+    cursor: grabbing;
+    transform: translate(-50%, -50%) scale(1.1);
+}
+
+.timeline-keyframes {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+}
+
+.timeline-keyframe {
+    position: absolute;
+    top: 50%;
+    width: 12px;
+    height: 12px;
+    background: #ff6b6b;
+    transform: translate(-50%, -50%) rotate(45deg);
+    cursor: pointer;
+    z-index: 10;
+    pointer-events: auto;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    transition: all 0.2s ease;
+}
+
+.timeline-keyframe:hover {
+    background: #ff5252;
+    transform: translate(-50%, -50%) rotate(45deg) scale(1.2);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.timeline-keyframe.active {
+    background: #ffd700;
+    border-color: #fff;
+}
+
 .frame-display {
     position: relative;
     border: 2px solid #555;

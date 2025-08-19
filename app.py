@@ -346,8 +346,6 @@ def get_frame(video_name, frame_index):
     frame_filename = f'frame_{ffmpeg_frame_number:06d}.jpg'
     frame_path = os.path.join(video_frames_folder, frame_filename)
     
-    print(f"Looking for frame: {frame_path}")
-    
     if os.path.exists(frame_path):
         return send_file(frame_path)
     return "Frame not found", 404
