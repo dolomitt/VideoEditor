@@ -102,6 +102,60 @@ Before running the application, ensure you have the following installed:
 - **Shift+Click** on a rectangle for quick deletion
 - Deleted rectangles can be restored using the ↺ button
 
+### Rectangle Inheritance Between Frames
+
+The video editor uses an intelligent inheritance system to manage rectangles across frames:
+
+#### How Inheritance Works
+1. **Rectangle Persistence**: When you draw a rectangle on a frame, it automatically appears on all subsequent frames
+2. **Keyframe System**: Each frame where you make changes (add, move, resize, or delete rectangles) becomes a "keyframe"
+3. **Automatic Propagation**: Changes made on a keyframe affect all frames until the next keyframe
+
+#### Rectangle States and Visual Indicators
+Rectangles are displayed with different colors and styles to indicate their state:
+
+- **🔴 Red Border (Solid)**: New rectangles created on the current frame
+- **🔵 Blue Border (Dashed)**: Inherited rectangles from previous keyframes (unchanged)
+- **🟢 Green Border**: Rectangles that were inherited and then modified on this frame
+- **🟣 Purple Border**: Rectangles that were moved from their inherited position
+- **🟠 Orange Border**: Rectangles that were resized from their inherited dimensions
+- **⚪ Gray Border (Dashed)**: Deleted rectangles (can be restored)
+
+#### Working with Inheritance
+1. **Creating Rectangles**: Draw on any frame - the rectangle appears on all subsequent frames
+2. **Modifying Inherited Rectangles**: 
+   - Move or resize an inherited rectangle to create a new keyframe
+   - The change affects all subsequent frames until the next keyframe
+3. **Deleting Rectangles**: 
+   - Delete a rectangle to remove it from the current frame and all subsequent frames
+   - Use the restore button (↺) to bring back deleted rectangles
+4. **Frame Navigation**: 
+   - Diamond markers on the timeline show keyframes
+   - Click diamonds to jump directly to frames with changes
+
+#### Practical Example
+```
+Frame 1: Draw rectangle A at position (100, 100)
+         → Rectangle A appears on all subsequent frames
+
+Frame 5: Move rectangle A to position (200, 100)
+         → Rectangle A moves to new position on frames 5-end
+         → Frames 1-4 keep the original position (100, 100)
+         → Frame 5 becomes a keyframe (diamond marker appears)
+
+Frame 8: Draw rectangle B at position (150, 150)
+         → Rectangle B appears on frames 8-end
+         → Rectangle A remains at position (200, 100)
+         → Frame 8 becomes a keyframe
+
+Frame 12: Delete rectangle A
+          → Rectangle A disappears from frames 12-end
+          → Rectangle B continues on frames 12-end
+          → Frame 12 becomes a keyframe
+```
+
+This system allows you to create complex animations and effects while maintaining full control over when and how rectangles appear, move, and disappear throughout your video.
+
 ### Property Panel
 
 The property panel (right side) shows details for the currently selected rectangle:
@@ -114,11 +168,14 @@ The property panel (right side) shows details for the currently selected rectang
 
 ### Timeline Navigation
 
-- **Click thumbnail images** to jump to specific frames
-- **Use arrow keys** (←/→) to navigate frame by frame
-- **Navigation buttons**:
-  - "← Previous Change" - Go to previous frame with rectangles
-  - "Next Change →" - Go to next frame with rectangles
+- **Timeline Scrubber**: Drag the handle or click anywhere on the timeline to jump to specific frames
+- **Diamond Keyframe Markers**: Click on diamond-shaped markers to jump to frames with rectangle changes
+- **Thumbnail Navigation**: Click thumbnail images to jump to specific frames
+- **Keyboard Navigation**: Use arrow keys (←/→) to navigate frame by frame
+- **Navigation Buttons**:
+  - "← Previous Keyframe" - Go to previous frame with rectangle changes
+  - "Next Keyframe →" - Go to next frame with rectangle changes
+- **Frame Counter**: Shows current frame and total frames with keyframe information
 
 ### Blur Settings
 
