@@ -34,6 +34,51 @@ body {
     margin: 0 auto;
 }
 
+.frame-and-info {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.frame-info-section {
+    margin-top: 10px;
+}
+
+.frame-info-display {
+    background: #3d3d3d;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    text-align: center;
+}
+
+.frame-navigation {
+    margin-top: 15px;
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+}
+
+.frame-navigation button {
+    padding: 8px 16px;
+    background: #0d7377;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.frame-navigation button:hover {
+    background: #14a085;
+}
+
 .frame-display {
     position: relative;
     border: 2px solid #555;
@@ -44,6 +89,22 @@ body {
     max-width: 60vw;
     max-height: 80vh;
     flex-shrink: 0;
+}
+
+.frame-size-overlay {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #e0e0e0;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-family: monospace;
+    z-index: 20;
+    pointer-events: none;
+    white-space: nowrap;
+    border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
 .property-box {
@@ -113,6 +174,148 @@ body {
 .property-table .property-value {
     color: #ccc;
     width: 60%;
+}
+
+/* Rectangle Management Section */
+.rectangle-management-section {
+    margin-bottom: 20px;
+    border-bottom: 1px solid #555;
+    padding-bottom: 15px;
+}
+
+.rectangle-management-section h3 {
+    margin: 0 0 15px 0;
+    color: #e0e0e0;
+    font-size: 16px;
+    border-bottom: 1px solid #555;
+    padding-bottom: 8px;
+}
+
+.rectangle-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.rect-btn {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.clear-btn {
+    background-color: #dc3545;
+    color: white;
+}
+
+.clear-btn:hover {
+    background-color: #c82333;
+}
+
+.load-btn {
+    background-color: #6c757d;
+    color: white;
+}
+
+.load-btn:hover {
+    background-color: #5a6268;
+}
+
+.save-btn {
+    background-color: #007bff;
+    color: white;
+}
+
+.save-btn:hover {
+    background-color: #0056b3;
+}
+
+/* Export Section */
+.export-section {
+    margin-top: 20px;
+    border-top: 1px solid #555;
+    padding-top: 15px;
+}
+
+.export-section h3 {
+    margin: 0 0 15px 0;
+    color: #e0e0e0;
+    font-size: 16px;
+    border-bottom: 1px solid #555;
+    padding-bottom: 8px;
+}
+
+.export-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.export-setting {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.export-setting label {
+    font-weight: bold;
+    color: #e0e0e0;
+    font-size: 12px;
+    flex: 1;
+}
+
+.export-setting select {
+    flex: 1.5;
+    padding: 4px 8px;
+    border: 1px solid #555;
+    border-radius: 4px;
+    background: #2d2d2d;
+    color: #e0e0e0;
+    font-size: 12px;
+}
+
+.export-setting select:focus {
+    outline: none;
+    border-color: #0d7377;
+}
+
+.export-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.export-buttons button {
+    padding: 8px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: bold;
+    transition: background-color 0.2s;
+}
+
+.preview-btn {
+    background-color: #28a745;
+    color: white;
+}
+
+.preview-btn:hover {
+    background-color: #218838;
+}
+
+.export-btn {
+    background-color: #0d7377;
+    color: white;
+}
+
+.export-btn:hover {
+    background-color: #14a085;
 }
 
 /* Frame Extraction Progress Modal */

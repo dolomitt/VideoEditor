@@ -122,11 +122,40 @@
         <div class="current-frame" id="currentFrame" style="display: none;">
 
             <div class="frame-editor-layout">
-                <div class="frame-display" id="frameDisplay">
-                    <img class="frame-image" id="frameImage" src="" alt="Current frame">
+                <div class="frame-and-info">
+                    <div class="frame-display" id="frameDisplay">
+                        <img class="frame-image" id="frameImage" src="" alt="Current frame">
+                        <!-- Frame Size Info - Top Right of Frame -->
+                        <div class="frame-size-overlay">
+                            <span id="frameSizeInfo"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Frame Number Info Section -->
+                    <div class="frame-info-section">
+                        <div class="frame-info-display">
+                            <span id="frameInfo" style="font-weight: bold;"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Navigation Controls -->
+                    <div class="frame-navigation">
+                        <button onclick="navigateToPreviousChange()">← Previous Keyframe</button>
+                        <button onclick="navigateToNextChange()">Next Keyframe →</button>
+                    </div>
                 </div>
                 
                 <div class="property-box" id="propertyBox">
+                    <!-- Rectangle Management Section -->
+                    <div class="rectangle-management-section">
+                        <h3>Rectangle Management</h3>
+                        <div class="rectangle-controls">
+                            <button onclick="clearRectangles()" class="rect-btn clear-btn">Clear All Rectangles</button>
+                            <button onclick="loadExistingRectangles()" class="rect-btn load-btn">Load Rectangles</button>
+                            <button onclick="saveRectangles()" class="rect-btn save-btn">Save Rectangle Data</button>
+                        </div>
+                    </div>
+                    
                     <h3>Rectangle Properties</h3>
                     <div class="property-table-container">
                         <table class="property-table">
@@ -143,47 +172,40 @@
                             </tbody>
                         </table>
                     </div>
+                    
+                    <!-- Export Section -->
+                    <div class="export-section">
+                        <h3>Export Settings</h3>
+                        
+                        <div class="export-controls">
+                            <div class="export-setting">
+                                <label for="codecSelect">Video Codec:</label>
+                                <select id="codecSelect">
+                                    <option value="libx264">libx264 (Software)</option>
+                                    <option value="h264_nvenc" selected>h264_nvenc (NVIDIA GPU)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="export-setting">
+                                <label for="blurAmount">Blur Amount:</label>
+                                <select id="blurAmount">
+                                    <option value="5">Light (5px)</option>
+                                    <option value="10">Medium (10px)</option>
+                                    <option value="15" selected>Heavy (15px)</option>
+                                    <option value="20">Very Heavy (20px)</option>
+                                    <option value="30">Extreme (30px)</option>
+                                </select>
+                            </div>
+                            
+                            <div class="export-buttons">
+                                <button onclick="previewBlurred()" class="preview-btn">Preview Blur (200 frames)</button>
+                                <button onclick="exportBlurred()" class="export-btn">Export Video with Blur</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            <div class="controls">
-                <!-- First row: Navigation and info -->
-                <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; gap: 10px;">
-                    <button onclick="navigateToPreviousChange()">← Previous Change</button>
-                    <button onclick="navigateToNextChange()">Next Change →</button>
-                    <span id="frameInfo" style="font-weight: bold;"></span>
-                    <span id="frameSizeInfo" style="color: #999; font-size: 12px;"></span>
-                </div>
-                
-                <!-- Second row: Action buttons and codec selector -->
-                <div style="display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px;">
-                    <button onclick="clearRectangles()">Clear All Rectangles</button>
-                    <button onclick="loadExistingRectangles()">Load Rectangles</button>
-                    <button onclick="saveRectangles()">Save Rectangle Data</button>
-                    
-                    <div class="codec-selector" style="display: inline-flex; align-items: center;">
-                        <label for="codecSelect" style="margin-right: 5px;">Video Codec:</label>
-                        <select id="codecSelect" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
-                            <option value="libx264">libx264 (Software)</option>
-                            <option value="h264_nvenc" selected>h264_nvenc (NVIDIA GPU)</option>
-                        </select>
-                    </div>
-                    
-                    <div class="blur-selector" style="display: inline-flex; align-items: center;">
-                        <label for="blurAmount" style="margin-right: 5px;">Blur Amount:</label>
-                        <select id="blurAmount" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;">
-                            <option value="5">Light (5px)</option>
-                            <option value="10">Medium (10px)</option>
-                            <option value="15" selected>Heavy (15px)</option>
-                            <option value="20">Very Heavy (20px)</option>
-                            <option value="30">Extreme (30px)</option>
-                        </select>
-                    </div>
-                    
-                    <button onclick="previewBlurred()" style="background-color: #28a745; color: white;">Preview Blur (200 frames)</button>
-                    <button onclick="exportBlurred()">Export Video with Blur</button>
-                </div>
-            </div>
 
         </div>
 
@@ -479,10 +501,10 @@
 
             // Calculate current frame time
             const currentTime = formatTime(frameIndex / videoFPS);
-            frameInfo.textContent = `Frame ${frameIndex + 1}/${totalFrames} (${currentTime}) | Current: ${currentRects.length} | Total: ${totalRects} | Frames with Changes: ${framesWithChanges.length}`;
+            frameInfo.textContent = `Frame ${frameIndex + 1}/${totalFrames} (${currentTime}) | Current: ${currentRects.length} | Total: ${totalRects} | Keyframes: ${framesWithChanges.length}`;
 
             console.log(`Frame ${frameIndex} has ${currentRects.length} rectangles:`, currentRects);
-            console.log(`All frames with changes:`, framesWithChanges);
+            console.log(`All frames with keyframes:`, framesWithChanges);
 
             setupDrawing();
             updateRectangles();
@@ -1464,7 +1486,7 @@
                 return sum + getActiveRectanglesForFrame(parseInt(frameIndex)).length;
             }, 0);
             const framesWithChanges = getFramesWithChanges();
-            frameInfo.textContent = `Frame ${currentFrameIndex + 1}/${totalFrames} (${formatTime(currentFrameIndex / videoFPS)}) | Active: ${activeRects.length} | Current Frame: ${currentFrameRects.length} | Total Frames with Changes: ${framesWithChanges.length}`;
+            frameInfo.textContent = `Frame ${currentFrameIndex + 1}/${totalFrames} (${formatTime(currentFrameIndex / videoFPS)}) | Active: ${activeRects.length} | Current Frame: ${currentFrameRects.length} | Keyframes: ${framesWithChanges.length}`;
         }
 
         function startDragging(e, rectDiv, index, rect) {
@@ -2370,28 +2392,28 @@
                 // Check for new rectangles (additions)
                 const actualRects = rects.filter(r => !r.isRemovalMarker);
                 if (actualRects.length > 0) {
-                    console.log(`Frame ${frameNum} has ${actualRects.length} actual rectangles - adding to changes`);
+                    console.log(`Frame ${frameNum} has ${actualRects.length} actual rectangles - adding to keyframes`);
                     framesWithChanges.add(frameNum);
                 }
 
                 // Check for removal markers (deleted rectangles)
                 const removals = rects.filter(r => r.isRemovalMarker);
                 if (removals.length > 0) {
-                    console.log(`Frame ${frameNum} has ${removals.length} removal markers - adding to changes`);
+                    console.log(`Frame ${frameNum} has ${removals.length} removal markers - adding to keyframes`);
                     framesWithChanges.add(frameNum);
                 }
 
                 // Check for rectangleMoved entries
                 const movedRects = rects.filter(r => r.rectangleMoved);
                 if (movedRects.length > 0) {
-                    console.log(`Frame ${frameNum} has ${movedRects.length} moved rectangles - adding to changes`);
+                    console.log(`Frame ${frameNum} has ${movedRects.length} moved rectangles - adding to keyframes`);
                     framesWithChanges.add(frameNum);
                 }
 
                 // Check for rectangleResized entries
                 const resizedRects = rects.filter(r => r.rectangleResized);
                 if (resizedRects.length > 0) {
-                    console.log(`Frame ${frameNum} has ${resizedRects.length} resized rectangles - adding to changes`);
+                    console.log(`Frame ${frameNum} has ${resizedRects.length} resized rectangles - adding to keyframes`);
                     framesWithChanges.add(frameNum);
                 }
             }
