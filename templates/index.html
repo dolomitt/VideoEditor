@@ -211,6 +211,18 @@
                                 <button onclick="previewBlurred()" class="preview-btn">Preview Blur (200 frames)</button>
                                 <button onclick="exportBlurred()" class="export-btn">Export Video with Blur</button>
                             </div>
+                            
+                            <div id="previewLinkContainer" class="preview-link-container" style="display: none;">
+                                <div class="preview-link-header">
+                                    <span class="preview-icon">🎬</span>
+                                    <strong>Preview Ready!</strong>
+                                </div>
+                                <a id="previewLink" href="#" target="_blank" class="preview-link">
+                                    <span class="link-icon">▶️</span>
+                                    <span class="link-text">View Preview Video</span>
+                                    <span class="link-hint">(opens in new tab)</span>
+                                </a>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -275,6 +287,9 @@
         }
 
         async function loadVideo() {
+            // Hide any existing preview link when loading new video
+            hidePreviewLink();
+            
             const select = document.getElementById('videoSelect');
             currentVideo = select.value;
 
@@ -2043,6 +2058,12 @@
                     const isPreview = job.filename && job.filename.startsWith('preview_');
                     const defaultMessage = isPreview ? 'Preview completed successfully!' : 'Export completed successfully!';
                     showToast(job.message || defaultMessage, 'success', 8000);
+                    
+                    // Show preview link if this was a preview job
+                    if (isPreview && job.filename) {
+                        showPreviewLink(job.filename);
+                    }
+                    
                     currentJobId = null;
                 }, 2000);
                 
@@ -2089,6 +2110,9 @@
         }
 
         async function previewBlurred() {
+            // Hide any existing preview link
+            hidePreviewLink();
+            
             // Find first frame with rectangles
             const framesWithRects = getFramesWithChanges();
             if (framesWithRects.length === 0) {
@@ -2722,6 +2746,28 @@
 
         loadVideos();
         checkFFmpegStatus();
+        
+        // Preview Link Functions
+        function showPreviewLink(filename) {
+            const container = document.getElementById('previewLinkContainer');
+            const link = document.getElementById('previewLink');
+            
+            if (container && link) {
+                link.href = `/serve_preview/${filename}`;
+                link.title = `Preview: ${filename}`;
+                container.style.display = 'block';
+                
+                // Show toast with additional info
+                showToast(`Preview ready! Click the link below to view your video.`, 'success', 5000);
+            }
+        }
+        
+        function hidePreviewLink() {
+            const container = document.getElementById('previewLinkContainer');
+            if (container) {
+                container.style.display = 'none';
+            }
+        }
 
         // FFmpeg Status Check Function
         async function checkFFmpegStatus() {

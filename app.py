@@ -1374,6 +1374,22 @@ def preview_blurred():
     
     return jsonify({'job_id': job_id, 'message': 'Preview started'})
 
+@app.route('/serve_preview/<filename>')
+def serve_preview(filename):
+    """Serve preview video files"""
+    try:
+        # Ensure the filename starts with 'preview_' for security
+        if not filename.startswith('preview_'):
+            return jsonify({'error': 'Invalid preview filename'}), 400
+            
+        file_path = os.path.join(EXPORT_FOLDER, filename)
+        if not os.path.exists(file_path):
+            return jsonify({'error': 'Preview file not found'}), 404
+            
+        return send_file(file_path, as_attachment=False, mimetype='video/mp4')
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/export_progress/<job_id>')
 def get_export_progress(job_id):
     """Get progress of an export job"""
