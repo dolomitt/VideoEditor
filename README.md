@@ -11,6 +11,7 @@ A web-based video editor that allows you to apply blur effects to specific regio
 - **Property Panel**: View detailed properties of selected rectangles
 - **Blur Effect Options**: Multiple blur intensity levels (Light to Extreme)
 - **Video Export**: Export processed video with blur effects applied
+- **Hardware Acceleration**: Automatic detection and selection of GPU encoders (NVIDIA NVENC, Intel QuickSync, AMD AMF)
 - **Preview Generation**: Generate preview clips to test effects
 - **Auto-save**: Automatic saving of rectangle data
 - **Keyboard Shortcuts**: Quick navigation and debugging tools
@@ -55,6 +56,12 @@ Before running the application, ensure you have the following installed:
    ```
    http://localhost:5000
    ```
+
+3. **Hardware encoder detection**: On page load, the application will:
+   - Check FFmpeg installation and version
+   - Scan for available hardware encoders
+   - Auto-select the best codec (NVIDIA NVENC H.264 preferred)
+   - Display status message with detected hardware encoders
 
 ### Loading a Video
 
@@ -128,11 +135,18 @@ Choose blur intensity from the dropdown:
 3. Useful for testing before full export
 
 #### Full Export
-1. **Select video codec**:
-   - `libx264` - Software encoding (compatible)
-   - `h264_nvenc` - NVIDIA GPU acceleration (faster)
+1. **Video codec auto-selection**: The application automatically detects and selects the best available codec:
+   - **NVIDIA NVENC H.264** - Highest priority (GPU acceleration, fastest)
+   - **Other hardware encoders** - Intel QuickSync, AMD AMF (GPU acceleration)
+   - **libx264** - Software encoding fallback (CPU, compatible with all systems)
 
-2. **Click "Export Video with Blur"** to start processing
+2. **Manual codec selection**: You can override the auto-selection by choosing from the dropdown:
+   - `NVIDIA NVENC H.264` - NVIDIA GPU acceleration (fastest, requires NVIDIA GPU)
+   - `Intel QuickSync H.264` - Intel integrated GPU acceleration (requires Intel iGPU)
+   - `AMD AMF H.264` - AMD GPU acceleration (requires AMD GPU)
+   - `libx264 (Software CPU)` - Software encoding (compatible with all systems)
+
+3. **Click "Export Video with Blur"** to start processing
 
 3. **Monitor progress** in the export modal showing:
    - Frame processing progress
@@ -205,7 +219,8 @@ VideoEditor/
 #### Performance Issues
 - **Large videos**: Consider reducing video resolution before processing
 - **Memory usage**: Close other applications during export
-- **Codec selection**: Use `h264_nvenc` if you have an NVIDIA GPU
+- **Hardware acceleration**: The application automatically selects the fastest available encoder
+- **Manual codec override**: Choose a different codec if auto-selection doesn't work optimally
 
 ### Debug Mode
 
@@ -221,6 +236,8 @@ Enable debug output by:
 - **Rectangle Persistence**: Rectangles persist across frames until explicitly deleted
 - **Memory Management**: Automatic cleanup during frame processing
 - **Audio Preservation**: Original audio track is copied to output (when possible)
+- **Hardware Encoder Detection**: Automatic scanning for NVIDIA NVENC, Intel QuickSync, and AMD AMF
+- **Codec Priority**: NVIDIA NVENC H.264 > Other hardware > Software (libx264)
 
 ## Tips for Best Results
 
