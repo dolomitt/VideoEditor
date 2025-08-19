@@ -2,6 +2,8 @@
 
 A web-based video editor that allows you to apply blur effects to specific regions of video frames by drawing rectangles on a timeline interface.
 
+![Video Editor Interface](Screenshot%202025-08-19%20091344.png)
+
 ## Features
 
 - **Video Frame Extraction**: Automatically extract frames from video files
