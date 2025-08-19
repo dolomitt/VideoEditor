@@ -32,7 +32,7 @@ Before running the application, ensure you have the following installed:
 
 2. **Install Python dependencies**:
    ```bash
-   pip install flask pillow psutil
+   pip install -r requirements.txt
    ```
 
 3. **Install FFmpeg**:
