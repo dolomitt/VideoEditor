@@ -15,6 +15,8 @@ import uuid
 from threading import Lock
 import re
 import tempfile
+import cv2
+import numpy as np
 
 app = Flask(__name__)
 
@@ -1519,6 +1521,138 @@ def save_rectangles():
     except Exception as e:
         print(f"Save error: {str(e)}")
         return jsonify({'error': f'Failed to save rectangles: {str(e)}'}), 500
+
+@app.route('/track_rectangle', methods=['POST'])
+def track_rectangle():
+    """Track an object forward through frames using template matching"""
+    try:
+        data = request.get_json()
+        video_name = data.get('video_name')
+        rectangle = data.get('rectangle')  # {x, y, width, height, rectId}
+        start_frame = data.get('start_frame')
+        fps = data.get('fps', 30)
+        
+        if not all([video_name, rectangle, start_frame is not None]):
+            return jsonify({'error': 'Missing required parameters'}), 400
+        
+        # Calculate frame limit (5 seconds worth)
+        frame_limit = min(fps * 5, 150)  # Cap at 150 frames for safety
+        
+        print(f"Starting tracking for rectangle {rectangle['rectId']} from frame {start_frame}")
+        print(f"Will process maximum {frame_limit} frames")
+        
+        # Get frame folder
+        video_base = video_name.split('.')[0]
+        frame_folder = os.path.join(FRAMES_FOLDER, video_base)
+        
+        if not os.path.exists(frame_folder):
+            return jsonify({'error': f'Frames not extracted for {video_name}. Please extract frames first.'}), 404
+        
+        # Check if we have enough frames
+        frame_files = [f for f in os.listdir(frame_folder) if f.startswith('frame_') and f.endswith('.jpg')]
+        if len(frame_files) == 0:
+            return jsonify({'error': f'No extracted frames found for {video_name}'}), 404
+        
+        # Load the template from the starting frame  
+        # FFmpeg starts numbering from 1, so add 1 to the frame index
+        ffmpeg_frame_number = start_frame + 1
+        start_frame_path = os.path.join(frame_folder, f"frame_{ffmpeg_frame_number:06d}.jpg")
+        if not os.path.exists(start_frame_path):
+            return jsonify({'error': f'Start frame {start_frame} (file: frame_{ffmpeg_frame_number:06d}.jpg) not found'}), 404
+        
+        # Load start frame and extract template
+        start_img = cv2.imread(start_frame_path)
+        if start_img is None:
+            return jsonify({'error': 'Could not load start frame'}), 500
+        
+        # Extract template region
+        x, y, w, h = rectangle['x'], rectangle['y'], rectangle['width'], rectangle['height']
+        template = start_img[y:y+h, x:x+w]
+        
+        if template.size == 0:
+            return jsonify({'error': 'Invalid rectangle coordinates'}), 400
+        
+        # Track forward
+        tracking_results = []
+        current_x, current_y = x, y
+        
+        # Get list of available frames
+        frame_files = sorted([f for f in os.listdir(frame_folder) if f.startswith('frame_') and f.endswith('.jpg')])
+        start_index = None
+        
+        # Find start frame index
+        for i, frame_file in enumerate(frame_files):
+            frame_num = int(frame_file.split('_')[1].split('.')[0])
+            # Convert FFmpeg frame number (1-based) to 0-based index
+            if frame_num - 1 == start_frame:
+                start_index = i
+                break
+        
+        if start_index is None:
+            return jsonify({'error': 'Start frame not found in sequence'}), 404
+        
+        processed_frames = 0
+        
+        # Process subsequent frames
+        for i in range(start_index + 1, min(start_index + 1 + frame_limit, len(frame_files))):
+            frame_file = frame_files[i]
+            ffmpeg_frame_num = int(frame_file.split('_')[1].split('.')[0])
+            # Convert FFmpeg frame number (1-based) to 0-based index for results
+            frame_num = ffmpeg_frame_num - 1  
+            frame_path = os.path.join(frame_folder, frame_file)
+            
+            # Load current frame
+            current_img = cv2.imread(frame_path)
+            if current_img is None:
+                print(f"Could not load frame {frame_num}, stopping tracking")
+                break
+            
+            # Perform template matching
+            result = cv2.matchTemplate(current_img, template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            
+            # Set threshold for good match
+            threshold = 0.6
+            if max_val >= threshold:
+                # Update position
+                current_x, current_y = max_loc
+                
+                tracking_results.append({
+                    'frame': frame_num,
+                    'x': current_x,
+                    'y': current_y,
+                    'width': w,
+                    'height': h,
+                    'confidence': float(max_val)
+                })
+                
+                print(f"Frame {frame_num}: Found at ({current_x}, {current_y}) with confidence {max_val:.3f}")
+                
+                # Update template with new region for better tracking
+                if max_val > 0.8:  # Only update template if very confident
+                    template = current_img[current_y:current_y+h, current_x:current_x+w]
+                
+            else:
+                print(f"Frame {frame_num}: Tracking lost (confidence {max_val:.3f} < {threshold})")
+                break
+            
+            processed_frames += 1
+        
+        print(f"Tracking completed. Processed {processed_frames} frames, found {len(tracking_results)} matches")
+        
+        return jsonify({
+            'success': True,
+            'rectangle_id': rectangle['rectId'],
+            'start_frame': start_frame,
+            'processed_frames': processed_frames,
+            'tracking_results': tracking_results
+        })
+        
+    except Exception as e:
+        print(f"Tracking error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': f'Tracking failed: {str(e)}'}), 500
 
 @app.route('/download_rectangles/<filename>')
 def download_rectangles(filename):

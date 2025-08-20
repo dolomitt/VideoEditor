@@ -13,6 +13,10 @@ let resizeHandle = null;
 let dragOffset = { x: 0, y: 0 };
 let imageScale = { x: 1, y: 1, offsetX: 0, offsetY: 0 };
 
+// Video playback state
+let isPlaying = false;
+let playbackInterval = null;
+
 // Debug: log whenever frameRectangles is modified
 console.log('Initialized frameRectangles:', frameRectangles);
 
@@ -385,6 +389,12 @@ function setupDrawing() {
             r.classList.remove('selected');
             r.querySelectorAll('.resize-handle').forEach(h => h.remove());
         });
+        
+        // Disable track button when no selection
+        const trackBtn = document.getElementById('trackBtn');
+        if (trackBtn) {
+            trackBtn.disabled = true;
+        }
         
         // Update property table to show no selection
         updatePropertyTable();
@@ -1457,6 +1467,12 @@ function selectRectangle(rectDiv, index, rect) {
     // Update property table with selected rectangle
     updatePropertyTable();
 
+    // Enable track button if a rectangle is selected
+    const trackBtn = document.getElementById('trackBtn');
+    if (trackBtn) {
+        trackBtn.disabled = false;
+    }
+
     // Add resize handles
     addResizeHandles(rectDiv, index);
 }
@@ -2386,6 +2402,40 @@ function navigateFrame(direction) {
     }
 }
 
+function startPlayback() {
+    if (totalFrames === 0) return;
+    
+    isPlaying = true;
+    const frameDelay = 1000 / videoFPS; // Convert FPS to milliseconds per frame
+    
+    playbackInterval = setInterval(() => {
+        let nextFrame = currentFrameIndex + 1;
+        
+        // Loop back to start when reaching the end
+        if (nextFrame >= totalFrames) {
+            nextFrame = 0;
+        }
+        
+        showFrame(nextFrame);
+    }, frameDelay);
+}
+
+function stopPlayback() {
+    isPlaying = false;
+    if (playbackInterval) {
+        clearInterval(playbackInterval);
+        playbackInterval = null;
+    }
+}
+
+function togglePlayback() {
+    if (isPlaying) {
+        stopPlayback();
+    } else {
+        startPlayback();
+    }
+}
+
 function getFramesWithChanges() {
     const framesWithChanges = new Set();
 
@@ -2564,12 +2614,20 @@ function navigateToNextChange() {
 }
 
 document.addEventListener('keydown', function (e) {
+    // Prevent keyboard shortcuts when typing in input fields
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+        return;
+    }
+    
     if (e.key === 'ArrowLeft') {
         e.preventDefault();
         navigateFrame(-1);
     } else if (e.key === 'ArrowRight') {
         e.preventDefault();
         navigateFrame(1);
+    } else if (e.key === ' ') { // Spacebar
+        e.preventDefault();
+        togglePlayback();
     } else if (e.key === 'd' && e.ctrlKey) {
         e.preventDefault();
         debugRectangleState();
@@ -2762,5 +2820,109 @@ async function cleanupFrames() {
     } catch (error) {
         console.error('Cleanup error:', error);
         showStatus('Cleanup failed: ' + error.message, 'error');
+    }
+}
+
+// Object tracking functionality
+async function trackSelectedRectangle() {
+    if (!selectedRect || !selectedRect.rect) {
+        showStatus('Please select a rectangle to track', 'error');
+        return;
+    }
+    
+    if (!currentVideo) {
+        showStatus('No video loaded', 'error');
+        return;
+    }
+    
+    const rect = selectedRect.rect;
+    const trackBtn = document.getElementById('trackBtn');
+    
+    try {
+        // Disable button during tracking
+        trackBtn.disabled = true;
+        trackBtn.textContent = 'Tracking...';
+        
+        showToast('Starting object tracking...', 'info', 3000);
+        
+        const response = await fetch('/track_rectangle', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                video_name: currentVideo,
+                rectangle: {
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                    rectId: rect.rectId
+                },
+                start_frame: currentFrameIndex,
+                fps: videoFPS
+            }),
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            // Apply tracking results to create move events
+            let movesCreated = 0;
+            
+            for (const trackResult of result.tracking_results) {
+                const frameIndex = trackResult.frame;
+                
+                // Only create moves if position changed significantly
+                const prevResult = result.tracking_results[result.tracking_results.indexOf(trackResult) - 1];
+                const startPos = prevResult || { x: rect.x, y: rect.y };
+                
+                const deltaX = Math.abs(trackResult.x - startPos.x);
+                const deltaY = Math.abs(trackResult.y - startPos.y);
+                
+                if (deltaX > 5 || deltaY > 5) { // Only if moved more than 5 pixels
+                    // Initialize frame if needed
+                    if (!frameRectangles[frameIndex]) {
+                        frameRectangles[frameIndex] = [];
+                    }
+                    
+                    // Remove existing move event for this rectangle
+                    frameRectangles[frameIndex] = frameRectangles[frameIndex].filter(r => 
+                        !(r.rectangleMoved === rect.rectId)
+                    );
+                    
+                    // Add new move event
+                    frameRectangles[frameIndex].push({
+                        rectangleMoved: rect.rectId,
+                        x: trackResult.x,
+                        y: trackResult.y,
+                        width: trackResult.width,
+                        height: trackResult.height
+                    });
+                    
+                    movesCreated++;
+                }
+            }
+            
+            // Update UI
+            updateRectangles();
+            updateFrameInfo();
+            updateTimelineScrubber();
+            autoSaveRectangles();
+            
+            showStatus(`Tracking completed! Created ${movesCreated} movement events across ${result.processed_frames} frames`, 'success');
+            showToast(`Tracked object through ${result.processed_frames} frames`, 'success', 4000);
+            
+        } else {
+            showStatus('Tracking failed: ' + result.error, 'error');
+        }
+        
+    } catch (error) {
+        console.error('Tracking error:', error);
+        showStatus('Tracking failed: ' + error.message, 'error');
+    } finally {
+        // Re-enable button
+        trackBtn.disabled = false;
+        trackBtn.textContent = 'Track Forward';
     }
 }
