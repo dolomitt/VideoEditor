@@ -13,6 +13,10 @@ let resizeHandle = null;
 let dragOffset = { x: 0, y: 0 };
 let imageScale = { x: 1, y: 1, offsetX: 0, offsetY: 0 };
 
+// Trim markers
+let trimStartFrame = null; // Frame to start export from
+let trimEndFrame = null;   // Frame to end export at
+
 // Video playback state
 let isPlaying = false;
 let playbackInterval = null;
@@ -256,6 +260,9 @@ function showFrame(frameIndex) {
     console.log(`Current rectangles data:`, frameRectangles);
 
     currentFrameIndex = frameIndex;
+    
+    // Update trim display when frame changes
+    updateTrimDisplay();
 
     const img = document.getElementById('frameImage');
     const frameUrl = `/get_frame/${currentVideo}/${frameIndex}`;
@@ -1525,30 +1532,53 @@ function startResizing(e, direction, index) {
 }
 
 function clearRectangles() {
-    console.log(`Clearing rectangles for frame ${currentFrameIndex}`);
-    if (frameRectangles[currentFrameIndex]) {
-        console.log(`Removed ${frameRectangles[currentFrameIndex].length} rectangles from frame ${currentFrameIndex}`);
-        delete frameRectangles[currentFrameIndex];
+    console.log('Clear all rectangles requested');
+    
+    // Count total rectangles that would be removed
+    let totalRectangles = 0;
+    Object.keys(frameRectangles).forEach(frameIndex => {
+        if (frameRectangles[frameIndex]) {
+            totalRectangles += frameRectangles[frameIndex].length;
+        }
+    });
+    
+    if (totalRectangles === 0) {
+        showToast('No rectangles to clear', 'info', 2000);
+        return;
     }
-
+    
+    // Ask for confirmation
+    const confirmed = confirm(
+        `This will permanently delete ALL ${totalRectangles} rectangle(s) from ALL frames.\n\n` +
+        `This action cannot be undone.\n\n` +
+        `Are you sure you want to continue?`
+    );
+    
+    if (!confirmed) {
+        console.log('Clear all rectangles cancelled by user');
+        return;
+    }
+    
+    console.log('Clearing ALL rectangles from ALL frames');
+    
+    // Clear all rectangles from all frames
+    frameRectangles = {};
     selectedRect = null;
+    
+    console.log(`Removed ${totalRectangles} rectangles from all frames`);
+    
+    // Update display for current frame
     updateFrameInfo();
     updateRectangles();
-}
-
-function clearRectangles() {
-    console.log(`Clearing rectangles for frame ${currentFrameIndex}`);
-    if (frameRectangles[currentFrameIndex]) {
-        console.log(`Removed ${frameRectangles[currentFrameIndex].length} rectangles from frame ${currentFrameIndex}`);
-        delete frameRectangles[currentFrameIndex];
-    }
-
-    selectedRect = null;
-    updateFrameInfo();
-    updateRectangles();
+    
+    // Update timeline scrubber to reflect changes (removes all keyframes)
+    updateTimelineScrubber();
 
     // Auto-save after clearing rectangles
     autoSaveRectangles();
+    
+    // Show confirmation message
+    showToast(`Cleared ${totalRectangles} rectangles from all frames`, 'success', 3000);
 }
 
 // Unified rectangle data preparation for both export and save
@@ -1960,6 +1990,13 @@ async function cancelExport() {
 }
 
 async function previewBlurred() {
+    // Check if blur preview is enabled
+    const previewEnabled = document.getElementById('enableBlurPreview').checked;
+    if (!previewEnabled) {
+        showToast('Blur preview is disabled. Enable it in export settings to generate previews.', 'info', 4000);
+        return;
+    }
+    
     // Hide any existing preview link
     hidePreviewLink();
     
@@ -1970,8 +2007,24 @@ async function previewBlurred() {
         return;
     }
 
-    const startFrame = framesWithRects[0];
-    const endFrame = Math.min(startFrame + 200, totalFrames - 1);
+    // Use trim markers if set, otherwise default preview behavior
+    let startFrame, endFrame;
+    
+    if (trimStartFrame !== null || trimEndFrame !== null) {
+        // Use trim markers for preview bounds
+        startFrame = trimStartFrame !== null ? trimStartFrame : 0;
+        endFrame = trimEndFrame !== null ? trimEndFrame : totalFrames - 1;
+        
+        // Limit preview to 200 frames max for performance
+        if (endFrame - startFrame > 199) {
+            endFrame = startFrame + 199;
+            showToast(`Preview limited to 200 frames (${startFrame + 1} to ${endFrame + 1}). Full trim will be applied during export.`, 'info', 4000);
+        }
+    } else {
+        // Default preview behavior - start from first rectangle frame
+        startFrame = framesWithRects[0];
+        endFrame = Math.min(startFrame + 200, totalFrames - 1);
+    }
 
     showToast(`Creating preview from frame ${startFrame + 1} to ${endFrame + 1} (${endFrame - startFrame + 1} frames)`, 'info', 3000);
 
@@ -2216,7 +2269,9 @@ async function exportBlurred() {
                 video_name: currentVideo,
                 frames: exportData.frames,  // Send in events format
                 blur_radius: selectedBlur,  // Use selected blur amount
-                video_codec: selectedCodec  // Include selected codec
+                video_codec: selectedCodec, // Include selected codec
+                trim_start_frame: trimStartFrame, // Include trim start frame
+                trim_end_frame: trimEndFrame      // Include trim end frame
             })
         });
 
@@ -2837,13 +2892,20 @@ async function trackSelectedRectangle() {
     
     const rect = selectedRect.rect;
     const trackBtn = document.getElementById('trackBtn');
+    const frameLimit = parseInt(document.getElementById('trackingFrames').value);
     
     try {
         // Disable button during tracking
         trackBtn.disabled = true;
         trackBtn.textContent = 'Tracking...';
         
-        showToast('Starting object tracking...', 'info', 3000);
+        // Show tracking progress modal
+        showTrackingModal();
+        
+        showToast('Starting enhanced OCR tracking...', 'info', 3000);
+        
+        // Start progress monitoring
+        const progressInterval = startProgressMonitoring();
         
         const response = await fetch('/track_rectangle', {
             method: 'POST',
@@ -2860,47 +2922,106 @@ async function trackSelectedRectangle() {
                     rectId: rect.rectId
                 },
                 start_frame: currentFrameIndex,
-                fps: videoFPS
+                fps: videoFPS,
+                frame_limit: frameLimit
             }),
         });
+        
+        // Stop progress monitoring
+        clearInterval(progressInterval);
         
         const result = await response.json();
         
         if (result.success) {
-            // Apply tracking results to create move events
-            let movesCreated = 0;
+            // Apply enhanced OCR tracking results to create keyframes
+            let keyframesCreated = 0;
+            let totalEvents = 0;
             
             for (const trackResult of result.tracking_results) {
                 const frameIndex = trackResult.frame;
                 
-                // Only create moves if position changed significantly
-                const prevResult = result.tracking_results[result.tracking_results.indexOf(trackResult) - 1];
-                const startPos = prevResult || { x: rect.x, y: rect.y };
+                // Initialize frame if needed
+                if (!frameRectangles[frameIndex]) {
+                    frameRectangles[frameIndex] = [];
+                }
                 
-                const deltaX = Math.abs(trackResult.x - startPos.x);
-                const deltaY = Math.abs(trackResult.y - startPos.y);
+                let eventCreated = false;
                 
-                if (deltaX > 5 || deltaY > 5) { // Only if moved more than 5 pixels
-                    // Initialize frame if needed
-                    if (!frameRectangles[frameIndex]) {
-                        frameRectangles[frameIndex] = [];
-                    }
+                // Create keyframe if rectangle was moved or resized (for OCR Enhanced methods)
+                if ((trackResult.method === 'OCR_Enhanced_Stage1' || trackResult.method === 'OCR_Enhanced_Stage2') && 
+                    (trackResult.rectangle_moved || trackResult.rectangle_resized)) {
                     
-                    // Remove existing move event for this rectangle
+                    console.log(`Frame ${frameIndex}: Creating OCR keyframe - moved: ${trackResult.rectangle_moved}, resized: ${trackResult.rectangle_resized}`);
+                    
+                    // Remove existing events for this rectangle
                     frameRectangles[frameIndex] = frameRectangles[frameIndex].filter(r => 
-                        !(r.rectangleMoved === rect.rectId)
+                        !(r.rectangleMoved === rect.rectId || r.rectangleResized === rect.rectId)
                     );
                     
-                    // Add new move event
-                    frameRectangles[frameIndex].push({
-                        rectangleMoved: rect.rectId,
-                        x: trackResult.x,
-                        y: trackResult.y,
-                        width: trackResult.width,
-                        height: trackResult.height
-                    });
+                    if (trackResult.rectangle_moved) {
+                        // Add move event
+                        frameRectangles[frameIndex].push({
+                            rectangleMoved: rect.rectId,
+                            x: trackResult.x,
+                            y: trackResult.y,
+                            width: trackResult.width,
+                            height: trackResult.height,
+                            ocrMethod: true,
+                            matchedTexts: trackResult.matched_texts || [],
+                            textCount: trackResult.text_count || 0,
+                            avgSimilarity: trackResult.avg_similarity || 0
+                        });
+                        totalEvents++;
+                        eventCreated = true;
+                    }
                     
-                    movesCreated++;
+                    if (trackResult.rectangle_resized) {
+                        // Add resize event
+                        frameRectangles[frameIndex].push({
+                            rectangleResized: rect.rectId,
+                            width: trackResult.width,
+                            height: trackResult.height,
+                            x: trackResult.x,
+                            y: trackResult.y,
+                            ocrMethod: true,
+                            matchedTexts: trackResult.matched_texts || [],
+                            textCount: trackResult.text_count || 0,
+                            avgSimilarity: trackResult.avg_similarity || 0
+                        });
+                        totalEvents++;
+                        eventCreated = true;
+                    }
+                    
+                    if (eventCreated) {
+                        keyframesCreated++;
+                        console.log(`Frame ${frameIndex}: Created keyframe with OCR data - texts: [${trackResult.matched_texts?.join(', ')}]`);
+                    }
+                } else if (trackResult.method === 'Template') {
+                    // Handle template-based tracking (existing logic)
+                    const prevResult = result.tracking_results[result.tracking_results.indexOf(trackResult) - 1];
+                    const startPos = prevResult || { x: rect.x, y: rect.y };
+                    
+                    const deltaX = Math.abs(trackResult.x - startPos.x);
+                    const deltaY = Math.abs(trackResult.y - startPos.y);
+                    
+                    if (deltaX > 5 || deltaY > 5) { // Only if moved more than 5 pixels
+                        // Remove existing move event for this rectangle
+                        frameRectangles[frameIndex] = frameRectangles[frameIndex].filter(r => 
+                            !(r.rectangleMoved === rect.rectId)
+                        );
+                        
+                        // Add new move event
+                        frameRectangles[frameIndex].push({
+                            rectangleMoved: rect.rectId,
+                            x: trackResult.x,
+                            y: trackResult.y,
+                            width: trackResult.width,
+                            height: trackResult.height,
+                            templateMethod: true
+                        });
+                        totalEvents++;
+                        keyframesCreated++;
+                    }
                 }
             }
             
@@ -2910,19 +3031,255 @@ async function trackSelectedRectangle() {
             updateTimelineScrubber();
             autoSaveRectangles();
             
-            showStatus(`Tracking completed! Created ${movesCreated} movement events across ${result.processed_frames} frames`, 'success');
-            showToast(`Tracked object through ${result.processed_frames} frames`, 'success', 4000);
+            // Enhanced success message
+            const methodInfo = result.tracking_method || 'Unknown';
+            const textInfo = result.text_elements && result.text_elements.length > 0 ? 
+                ` (tracking ${result.text_elements.length} text elements: ${result.text_elements.join(', ')})` : '';
+            
+            showStatus(`Enhanced tracking completed! Created ${keyframesCreated} keyframes with ${totalEvents} events across ${result.processed_frames} frames using ${methodInfo}${textInfo}`, 'success');
+            showToast(`OCR Enhanced: Tracked ${result.processed_frames} frames, created ${keyframesCreated} keyframes`, 'success', 5000);
             
         } else {
             showStatus('Tracking failed: ' + result.error, 'error');
+            // Update timeline even on failure in case partial tracking occurred
+            updateTimelineScrubber();
         }
         
     } catch (error) {
         console.error('Tracking error:', error);
         showStatus('Tracking failed: ' + error.message, 'error');
+        // Update timeline even on error in case partial tracking occurred
+        updateTimelineScrubber();
     } finally {
-        // Re-enable button
+        // Hide tracking modal and re-enable button
+        hideTrackingModal();
         trackBtn.disabled = false;
         trackBtn.textContent = 'Track Forward';
     }
 }
+
+function showTrackingModal() {
+    const modal = document.getElementById('trackingModal');
+    if (modal) {
+        modal.style.display = 'block';
+        // Reset progress
+        updateTrackingProgress({
+            stage: 'analyzing',
+            progress: 0,
+            current_frame: 0,
+            total_frames: 0,
+            message: 'Initializing tracking...',
+            method: 'OCR Enhanced',
+            keyframes_created: 0
+        });
+    }
+}
+
+function hideTrackingModal() {
+    const modal = document.getElementById('trackingModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+function startProgressMonitoring() {
+    return setInterval(async () => {
+        try {
+            const response = await fetch('/tracking_progress');
+            const progress = await response.json();
+            updateTrackingProgress(progress);
+            
+            // Auto-hide modal when completed or cancelled
+            if (!progress.active && (progress.stage === 'completed' || progress.stage === 'cancelled' || progress.stage === 'error')) {
+                setTimeout(hideTrackingModal, 2000); // Hide after 2 seconds
+            }
+        } catch (error) {
+            console.error('Error fetching tracking progress:', error);
+        }
+    }, 500); // Update every 500ms
+}
+
+function updateTrackingProgress(progress) {
+    // Update progress bar
+    const progressBar = document.getElementById('trackingProgressBarFill');
+    if (progressBar) {
+        progressBar.style.width = `${progress.progress || 0}%`;
+    }
+    
+    // Update details
+    const elements = {
+        'targetFramesCount': progress.total_frames || '-',
+        'processedFramesCount': progress.current_frame || 0,
+        'trackingMethod': progress.method || 'OCR Enhanced',
+        'keyframesCreated': progress.keyframes_created || 0,
+        'trackingProgressText': progress.message || 'Processing...'
+    };
+    
+    Object.entries(elements).forEach(([id, value]) => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.textContent = value;
+        }
+    });
+    
+    // Update step status based on stage
+    updateTrackingSteps(progress.stage);
+}
+
+function updateTrackingSteps(stage) {
+    const steps = ['trackStep1', 'trackStep2', 'trackStep3'];
+    const stepStates = {
+        'analyzing': [1, 0, 0],  // Step 1 active
+        'tracking': [2, 1, 0],   // Step 1 complete, Step 2 active
+        'completed': [2, 2, 2],  // All steps complete
+        'cancelled': [0, 0, 0],  // Reset all
+        'error': [3, 3, 3]       // All error
+    };
+    
+    const states = stepStates[stage] || [0, 0, 0];
+    const stateClasses = ['pending', 'active', 'completed', 'error'];
+    const stateIcons = ['⏳', '🔄', '✅', '❌'];
+    
+    steps.forEach((stepId, index) => {
+        const step = document.getElementById(stepId);
+        if (step) {
+            const icon = step.querySelector('.step-icon');
+            const status = step.querySelector('.step-status');
+            const state = states[index];
+            
+            if (icon) icon.textContent = stateIcons[state];
+            if (status) status.textContent = stateClasses[state];
+        }
+    });
+}
+
+async function cancelTracking() {
+    try {
+        await fetch('/cancel_tracking', { method: 'POST' });
+        showToast('Tracking cancellation requested...', 'info', 2000);
+    } catch (error) {
+        console.error('Error cancelling tracking:', error);
+    }
+}
+
+function updatePreviewButtonState() {
+    const checkbox = document.getElementById('enableBlurPreview');
+    const button = document.querySelector('.preview-btn');
+    
+    if (checkbox && button) {
+        if (checkbox.checked) {
+            button.textContent = 'Preview Blur (200 frames)';
+            button.disabled = false;
+            button.style.opacity = '1';
+        } else {
+            button.textContent = 'Preview Disabled';
+            button.disabled = true;
+            button.style.opacity = '0.6';
+        }
+    }
+}
+
+// Trim marker functions
+function trimFromCurrentFrame() {
+    if (!currentVideo) {
+        showStatus('No video loaded', 'error');
+        return;
+    }
+    
+    // Check if this would create an invalid range
+    if (trimEndFrame !== null && currentFrameIndex >= trimEndFrame) {
+        showStatus(`Trim start (frame ${currentFrameIndex}) cannot be at or after trim end (frame ${trimEndFrame})`, 'error');
+        return;
+    }
+    
+    trimStartFrame = currentFrameIndex;
+    showStatus(`Trim start marked at frame ${currentFrameIndex}`, 'success');
+    updateTrimDisplay();
+}
+
+function trimToCurrentFrame() {
+    if (!currentVideo) {
+        showStatus('No video loaded', 'error');
+        return;
+    }
+    
+    // Check if this would create an invalid range
+    if (trimStartFrame !== null && currentFrameIndex <= trimStartFrame) {
+        showStatus(`Trim end (frame ${currentFrameIndex}) cannot be at or before trim start (frame ${trimStartFrame})`, 'error');
+        return;
+    }
+    
+    trimEndFrame = currentFrameIndex;
+    showStatus(`Trim end marked at frame ${currentFrameIndex}`, 'success');
+    updateTrimDisplay();
+}
+
+function clearTrimMarkers() {
+    trimStartFrame = null;
+    trimEndFrame = null;
+    showStatus('Trim markers cleared', 'info');
+    updateTrimDisplay();
+}
+
+function updateTrimDisplay() {
+    // Update button states and display trim information
+    const trimInfo = document.getElementById('trimInfo');
+    if (trimInfo) {
+        let trimText = '';
+        if (trimStartFrame !== null || trimEndFrame !== null) {
+            const start = trimStartFrame !== null ? `frame ${trimStartFrame}` : 'start';
+            const end = trimEndFrame !== null ? `frame ${trimEndFrame}` : 'end';
+            trimText = `Export range: ${start} → ${end}`;
+        } else {
+            trimText = 'No trim markers set';
+        }
+        trimInfo.textContent = trimText;
+    }
+    
+    // Check for validation issues with current frame
+    const leftInvalid = trimEndFrame !== null && currentFrameIndex >= trimEndFrame;
+    const rightInvalid = trimStartFrame !== null && currentFrameIndex <= trimStartFrame;
+    
+    // Update button appearances
+    const leftBtn = document.querySelector('.trim-left');
+    const rightBtn = document.querySelector('.trim-right');
+    
+    if (leftBtn) {
+        if (leftInvalid) {
+            leftBtn.style.backgroundColor = '#dc3545'; // Red for invalid
+            leftBtn.title = `Cannot set trim start at frame ${currentFrameIndex} (must be before trim end at frame ${trimEndFrame})`;
+        } else if (trimStartFrame !== null) {
+            leftBtn.style.backgroundColor = '#fd7e14'; // Orange for set
+            leftBtn.title = `Trim start set at frame ${trimStartFrame}. Click to update.`;
+        } else {
+            leftBtn.style.backgroundColor = '#6c757d'; // Gray for unset
+            leftBtn.title = 'Set trim start at current frame';
+        }
+    }
+    
+    if (rightBtn) {
+        if (rightInvalid) {
+            rightBtn.style.backgroundColor = '#dc3545'; // Red for invalid
+            rightBtn.title = `Cannot set trim end at frame ${currentFrameIndex} (must be after trim start at frame ${trimStartFrame})`;
+        } else if (trimEndFrame !== null) {
+            rightBtn.style.backgroundColor = '#20c997'; // Teal for set
+            rightBtn.title = `Trim end set at frame ${trimEndFrame}. Click to update.`;
+        } else {
+            rightBtn.style.backgroundColor = '#6c757d'; // Gray for unset
+            rightBtn.title = 'Set trim end at current frame';
+        }
+    }
+}
+
+// Add event listener for checkbox change
+document.addEventListener('DOMContentLoaded', function() {
+    const checkbox = document.getElementById('enableBlurPreview');
+    if (checkbox) {
+        checkbox.addEventListener('change', updatePreviewButtonState);
+        // Set initial state
+        updatePreviewButtonState();
+    }
+    
+    // Initialize trim display
+    updateTrimDisplay();
+});

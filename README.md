@@ -30,17 +30,26 @@ Before running the application, ensure you have the following installed:
 
 1. **Clone or download** this repository to your local machine
 
-2. **Install Python dependencies**:
+2. **Create a virtual environment** (recommended):
+   ```bash
+   python -m venv venv
+   ```
+
+3. **Activate the virtual environment**:
+   - **Windows**: `venv\Scripts\activate`
+   - **macOS/Linux**: `source venv/bin/activate`
+
+4. **Install Python dependencies**:
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Install FFmpeg**:
+5. **Install FFmpeg**:
    - **Windows**: Download from [https://ffmpeg.org/download.html](https://ffmpeg.org/download.html)
    - **macOS**: `brew install ffmpeg`
    - **Linux**: `sudo apt install ffmpeg` (Ubuntu/Debian) or equivalent
 
-4. **Create required directories** (will be created automatically on first run):
+6. **Create required directories** (will be created automatically on first run):
    - `data/` - for uploaded video files
    - `frames/` - for extracted frame images
    - `exports/` - for exported videos and saved rectangle data
@@ -49,17 +58,21 @@ Before running the application, ensure you have the following installed:
 
 ### Starting the Application
 
-1. **Run the Flask application**:
+1. **Activate the virtual environment** (if not already active):
+   - **Windows**: `venv\Scripts\activate`
+   - **macOS/Linux**: `source venv/bin/activate`
+
+2. **Run the Flask application**:
    ```bash
    python app.py
    ```
 
-2. **Open your web browser** and navigate to:
+3. **Open your web browser** and navigate to:
    ```
    http://localhost:5000
    ```
 
-3. **Hardware encoder detection**: On page load, the application will:
+4. **Hardware encoder detection**: On page load, the application will:
    - Check FFmpeg installation and version
    - Scan for available hardware encoders
    - Auto-select the best codec (NVIDIA NVENC H.264 preferred)

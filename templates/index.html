@@ -57,6 +57,56 @@
         </div>
     </div>
 
+    <!-- Tracking Progress Modal -->
+    <div class="tracking-modal" id="trackingModal" style="display: none;">
+        <div class="tracking-modal-content">
+            <h3>OCR Enhanced Tracking</h3>
+            <div class="tracking-progress">
+                <div class="tracking-step" id="trackStep1">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Analyzing initial rectangle text...</span>
+                    <span class="step-status">pending</span>
+                </div>
+                <div class="tracking-step" id="trackStep2">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Tracking through frames...</span>
+                    <span class="step-status">pending</span>
+                </div>
+                <div class="tracking-step" id="trackStep3">
+                    <span class="step-icon">⏳</span>
+                    <span class="step-text">Creating keyframes...</span>
+                    <span class="step-status">pending</span>
+                </div>
+            </div>
+            <div class="tracking-details" id="trackingDetails">
+                <div class="detail-item">
+                    <span class="detail-label">Target frames:</span>
+                    <span class="detail-value" id="targetFramesCount">-</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Processed:</span>
+                    <span class="detail-value" id="processedFramesCount">0</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Method:</span>
+                    <span class="detail-value" id="trackingMethod">OCR Enhanced</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Keyframes created:</span>
+                    <span class="detail-value" id="keyframesCreated">0</span>
+                </div>
+                <div class="detail-item">
+                    <span class="detail-label">Progress:</span>
+                    <span class="detail-value" id="trackingProgressText">Starting...</span>
+                </div>
+            </div>
+            <div class="tracking-progress-bar">
+                <div class="progress-bar-fill" id="trackingProgressBarFill"></div>
+            </div>
+            <button class="cancel-tracking" id="cancelTracking" onclick="cancelTracking()">Cancel</button>
+        </div>
+    </div>
+
     <!-- Export Progress Modal -->
     <div class="export-modal" id="exportModal" style="display: none;">
         <div class="export-modal-content">
@@ -153,6 +203,18 @@
                         <button onclick="navigateToPreviousChange()">← Previous Keyframe</button>
                         <button onclick="navigateToNextChange()">Next Keyframe →</button>
                     </div>
+                    
+                    <!-- Trim Controls -->
+                    <div class="trim-controls">
+                        <button onclick="trimFromCurrentFrame()" class="trim-btn trim-left" title="Set trim start at current frame">[ Trim Left</button>
+                        <button onclick="trimToCurrentFrame()" class="trim-btn trim-right" title="Set trim end at current frame">Trim Right ]</button>
+                        <button onclick="clearTrimMarkers()" class="trim-btn trim-clear" title="Clear trim markers">Clear</button>
+                    </div>
+                    
+                    <!-- Trim Info Display -->
+                    <div class="trim-info">
+                        <span id="trimInfo">No trim markers set</span>
+                    </div>
                 </div>
                 
                 <div class="property-box" id="propertyBox">
@@ -163,7 +225,19 @@
                             <button onclick="clearRectangles()" class="rect-btn clear-btn">Clear All Rectangles</button>
                             <button onclick="loadExistingRectangles()" class="rect-btn load-btn">Load Rectangles</button>
                             <button onclick="saveRectangles()" class="rect-btn save-btn">Save Rectangle Data</button>
-                            <button onclick="trackSelectedRectangle()" class="rect-btn track-btn" id="trackBtn" disabled>Track Forward</button>
+                            <div class="tracking-controls">
+                                <label for="trackingFrames" style="font-size: 12px; margin-right: 8px;">Track frames:</label>
+                                <select id="trackingFrames" style="padding: 4px; margin-right: 8px; font-size: 12px;">
+                                    <option value="30">30 frames (1 sec)</option>
+                                    <option value="60">60 frames (2 sec)</option>
+                                    <option value="150" selected>150 frames (5 sec)</option>
+                                    <option value="300">300 frames (10 sec)</option>
+                                    <option value="600">600 frames (20 sec)</option>
+                                    <option value="900">900 frames (30 sec)</option>
+                                    <option value="-1">All remaining frames</option>
+                                </select>
+                                <button onclick="trackSelectedRectangle()" class="rect-btn track-btn" id="trackBtn" disabled>Track Forward</button>
+                            </div>
                         </div>
                     </div>
                     
@@ -206,6 +280,16 @@
                                     <option value="20">Very Heavy (20px)</option>
                                     <option value="30">Extreme (30px)</option>
                                 </select>
+                            </div>
+                            
+                            <div class="export-setting">
+                                <label for="enableBlurPreview" style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                                    <input type="checkbox" id="enableBlurPreview" checked style="margin: 0;">
+                                    <span>Enable Blur Preview</span>
+                                </label>
+                                <small style="color: #999; font-size: 11px; margin-top: 4px; display: block;">
+                                    Generate preview video to test blur effects before full export
+                                </small>
                             </div>
                             
                             <div class="export-buttons">

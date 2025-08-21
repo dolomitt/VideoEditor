@@ -7,18 +7,45 @@ from PIL import Image, ImageFilter
 import base64
 from io import BytesIO
 import time
+from datetime import datetime
 import psutil
 import gc
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import uuid
 from threading import Lock
+from flask import Response
+import json
 import re
 import tempfile
 import cv2
 import numpy as np
+import easyocr
+from fuzzywuzzy import fuzz
 
 app = Flask(__name__)
+
+# Initialize OCR reader (lazy loaded)
+ocr_reader = None
+
+def get_ocr_reader():
+    global ocr_reader
+    if ocr_reader is None:
+        ocr_reader = easyocr.Reader(['en'])
+    return ocr_reader
+
+# Global tracking state
+tracking_state = {
+    'active': False,
+    'progress': 0,
+    'current_frame': 0,
+    'total_frames': 0,
+    'stage': 'idle',
+    'method': '',
+    'keyframes_created': 0,
+    'message': '',
+    'cancelled': False
+}
 
 UPLOAD_FOLDER = 'data'
 FRAMES_FOLDER = 'frames'
@@ -735,6 +762,18 @@ def export_blurred_async(job_id, data):
         video_name = data['video_name']
         blur_radius = data.get('blur_radius', 5)
         video_codec = data.get('video_codec', 'libx264')
+        trim_start_frame = data.get('trim_start_frame')
+        trim_end_frame = data.get('trim_end_frame')
+        
+        # Validate trim parameters
+        if trim_start_frame is not None and trim_end_frame is not None:
+            if trim_start_frame >= trim_end_frame:
+                with jobs_lock:
+                    if job_id in jobs:
+                        jobs[job_id]['status'] = 'error'
+                        jobs[job_id]['message'] = f'Invalid trim range: start frame {trim_start_frame} must be before end frame {trim_end_frame}'
+                print(f"Export failed: Invalid trim range {trim_start_frame} >= {trim_end_frame}")
+                return
         
         with jobs_lock:
             if job_id not in jobs:
@@ -944,17 +983,30 @@ def export_blurred_async(job_id, data):
                     rect_ids = list(precomputed_rectangles[frame_idx].keys())
                     print(f"  Frame {frame_idx}: {rect_ids}")
         
-        # Prepare frame processing tasks
+        # Prepare frame processing tasks (with trim support)
         frame_tasks = []
         for frame_file in frame_files:
-            original_frame_path = os.path.join(video_frames_folder, frame_file)
-            blurred_frame_path = os.path.join(blurred_frames_folder, frame_file)
-            
             # Extract frame index from filename (FFmpeg starts from 1, but UI uses 0-based)
             ffmpeg_frame_number = int(frame_file.split('_')[1].split('.')[0])
             ui_frame_index = ffmpeg_frame_number - 1  # Convert to 0-based indexing for UI
             
+            # Apply trim filtering
+            if trim_start_frame is not None and ui_frame_index < trim_start_frame:
+                continue  # Skip frames before trim start
+            if trim_end_frame is not None and ui_frame_index > trim_end_frame:
+                continue  # Skip frames after trim end
+            
+            original_frame_path = os.path.join(video_frames_folder, frame_file)
+            blurred_frame_path = os.path.join(blurred_frames_folder, frame_file)
+            
             frame_tasks.append((original_frame_path, blurred_frame_path, ui_frame_index, precomputed_rectangles, blur_radius))
+        
+        # Log trim information
+        if trim_start_frame is not None or trim_end_frame is not None:
+            start_info = f"frame {trim_start_frame}" if trim_start_frame is not None else "start"
+            end_info = f"frame {trim_end_frame}" if trim_end_frame is not None else "end"
+            print(f"Trimming enabled: {start_info} → {end_info}")
+            print(f"Processing {len(frame_tasks)} frames (trimmed from {len(frame_files)} total frames)")
         
         # Process frames with multithreading and progress tracking
         processing_start_time = time.time()
@@ -1414,6 +1466,7 @@ def cancel_export(job_id):
         else:
             return jsonify({'error': 'Job not found'}), 404
 
+
 @app.route('/save_rectangles', methods=['POST'])
 def save_rectangles():
     data = request.json
@@ -1522,21 +1575,307 @@ def save_rectangles():
         print(f"Save error: {str(e)}")
         return jsonify({'error': f'Failed to save rectangles: {str(e)}'}), 500
 
+def extract_text_from_region(image, x, y, w, h):
+    """Extract text from a specific region of an image using OCR"""
+    try:
+        # Extract the region
+        region = image[y:y+h, x:x+w]
+        
+        # Get OCR reader
+        reader = get_ocr_reader()
+        
+        # Perform OCR
+        results = reader.readtext(region)
+        
+        # Extract text with confidence
+        texts = []
+        for (bbox, text, confidence) in results:
+            if confidence > 0.5:  # Only keep confident results
+                texts.append({
+                    'text': text.strip(),
+                    'confidence': confidence,
+                    'bbox': bbox
+                })
+        
+        return texts
+    except Exception as e:
+        print(f"OCR error: {e}")
+        return []
+
+def find_all_text_in_frame(image):
+    """Find all text elements in the entire frame"""
+    try:
+        reader = get_ocr_reader()
+        results = reader.readtext(image)
+        
+        text_elements = []
+        for (bbox, text, confidence) in results:
+            if confidence > 0.5:  # Only keep confident results
+                # Calculate bounding box
+                bbox_array = np.array(bbox)
+                x_coords = bbox_array[:, 0]
+                y_coords = bbox_array[:, 1]
+                
+                text_elements.append({
+                    'text': text.strip(),
+                    'confidence': confidence,
+                    'bbox': {
+                        'x': int(np.min(x_coords)),
+                        'y': int(np.min(y_coords)),
+                        'width': int(np.max(x_coords) - np.min(x_coords)),
+                        'height': int(np.max(y_coords) - np.min(y_coords)),
+                        'center_x': int(np.mean(x_coords)),
+                        'center_y': int(np.mean(y_coords))
+                    }
+                })
+        
+        return text_elements
+    except Exception as e:
+        print(f"Full frame OCR error: {e}")
+        return []
+
+def find_matching_texts(frame_texts, target_texts, similarity_threshold=70):
+    """Find target texts in frame text elements using fuzzy matching"""
+    matches = []
+    
+    for target in target_texts:
+        best_match = None
+        best_score = 0
+        
+        for frame_text in frame_texts:
+            # Use fuzzy matching
+            ratio = fuzz.ratio(target['text'].lower(), frame_text['text'].lower())
+            partial = fuzz.partial_ratio(target['text'].lower(), frame_text['text'].lower())
+            token_sort = fuzz.token_sort_ratio(target['text'].lower(), frame_text['text'].lower())
+            
+            # Combined score
+            combined_score = (ratio * 0.4 + partial * 0.3 + token_sort * 0.3)
+            
+            if combined_score > best_score and combined_score >= similarity_threshold:
+                best_match = frame_text
+                best_score = combined_score
+        
+        if best_match:
+            match_info = best_match.copy()
+            match_info['similarity'] = best_score
+            match_info['target_text'] = target['text']
+            matches.append(match_info)
+    
+    return matches
+
+def scan_rectangle_area(image, x, y, w, h, padding=10):
+    """Scan a specific rectangle area with optional padding"""
+    try:
+        # Add padding around the rectangle
+        padded_x = max(0, x - padding)
+        padded_y = max(0, y - padding)
+        padded_w = min(image.shape[1] - padded_x, w + (2 * padding))
+        padded_h = min(image.shape[0] - padded_y, h + (2 * padding))
+        
+        # Extract the region
+        region = image[padded_y:padded_y+padded_h, padded_x:padded_x+padded_w]
+        
+        # Run OCR on the region
+        reader = get_ocr_reader()
+        results = reader.readtext(region)
+        
+        text_elements = []
+        for (bbox, text, confidence) in results:
+            if confidence > 0.5:
+                # Calculate bounding box relative to original image
+                bbox_array = np.array(bbox)
+                x_coords = bbox_array[:, 0] + padded_x  # Adjust for region offset
+                y_coords = bbox_array[:, 1] + padded_y  # Adjust for region offset
+                
+                text_elements.append({
+                    'text': text.strip(),
+                    'confidence': confidence,
+                    'bbox': {
+                        'x': int(np.min(x_coords)),
+                        'y': int(np.min(y_coords)),
+                        'width': int(np.max(x_coords) - np.min(x_coords)),
+                        'height': int(np.max(y_coords) - np.min(y_coords)),
+                        'center_x': int(np.mean(x_coords)),
+                        'center_y': int(np.mean(y_coords))
+                    }
+                })
+        
+        return text_elements
+    except Exception as e:
+        print(f"Rectangle area OCR error: {e}")
+        return []
+
+def check_all_targets_found(matches, target_texts, coverage_threshold=0.8):
+    """Check if we found enough of our target texts"""
+    if not target_texts:
+        return True
+    
+    found_count = len(matches)
+    total_count = len(target_texts)
+    coverage_ratio = found_count / total_count
+    
+    return coverage_ratio >= coverage_threshold
+
+def calculate_covering_rectangle(text_matches, padding=5):
+    """Calculate the minimum rectangle that covers all text matches"""
+    if not text_matches:
+        return None
+    
+    # Find bounds of all text elements
+    min_x = min(match['bbox']['x'] for match in text_matches)
+    min_y = min(match['bbox']['y'] for match in text_matches)
+    max_x = max(match['bbox']['x'] + match['bbox']['width'] for match in text_matches)
+    max_y = max(match['bbox']['y'] + match['bbox']['height'] for match in text_matches)
+    
+    # Add padding
+    return {
+        'x': max(0, min_x - padding),
+        'y': max(0, min_y - padding),
+        'width': max_x - min_x + (2 * padding),
+        'height': max_y - min_y + (2 * padding)
+    }
+
+def stabilize_rectangle_position(new_rect, current_rect, stability_threshold=3):
+    """Stabilize rectangle position to prevent small jittery movements"""
+    if not new_rect or not current_rect:
+        return new_rect
+    
+    # Check if the movement is within the stability threshold
+    x_diff = abs(new_rect['x'] - current_rect['x'])
+    y_diff = abs(new_rect['y'] - current_rect['y'])
+    width_diff = abs(new_rect['width'] - current_rect['width']) 
+    height_diff = abs(new_rect['height'] - current_rect['height'])
+    
+    # Use current position if movement is too small (likely OCR noise)
+    stabilized_rect = {
+        'x': current_rect['x'] if x_diff <= stability_threshold else new_rect['x'],
+        'y': current_rect['y'] if y_diff <= stability_threshold else new_rect['y'],
+        'width': current_rect['width'] if width_diff <= stability_threshold else new_rect['width'],
+        'height': current_rect['height'] if height_diff <= stability_threshold else new_rect['height']
+    }
+    
+    return stabilized_rect
+
+def find_text_in_frame(image, target_texts, search_area=None):
+    """Find similar text in a frame and return the best match location"""
+    try:
+        reader = get_ocr_reader()
+        
+        # If search area is specified, crop the image
+        if search_area:
+            x, y, w, h = search_area
+            # Expand search area by 50% to account for movement
+            expand = 0.5
+            expand_w = int(w * expand)
+            expand_h = int(h * expand)
+            
+            new_x = max(0, x - expand_w // 2)
+            new_y = max(0, y - expand_h // 2)
+            new_w = min(image.shape[1] - new_x, w + expand_w)
+            new_h = min(image.shape[0] - new_y, h + expand_h)
+            
+            search_image = image[new_y:new_y+new_h, new_x:new_x+new_w]
+            offset_x, offset_y = new_x, new_y
+        else:
+            search_image = image
+            offset_x, offset_y = 0, 0
+        
+        # Perform OCR on search area
+        results = reader.readtext(search_image)
+        
+        best_match = None
+        best_score = 0
+        
+        for (bbox, found_text, confidence) in results:
+            if confidence < 0.5:
+                continue
+                
+            # Compare with target texts using fuzzy matching
+            for target_text in target_texts:
+                # Use different similarity metrics
+                ratio = fuzz.ratio(target_text['text'].lower(), found_text.lower())
+                partial = fuzz.partial_ratio(target_text['text'].lower(), found_text.lower())
+                token_sort = fuzz.token_sort_ratio(target_text['text'].lower(), found_text.lower())
+                
+                # Combined score weighted by original confidence
+                combined_score = (ratio * 0.4 + partial * 0.3 + token_sort * 0.3) * target_text['confidence']
+                
+                if combined_score > best_score and combined_score > 60:  # Minimum similarity threshold
+                    # Calculate bounding box center
+                    bbox_array = np.array(bbox)
+                    center_x = int(np.mean(bbox_array[:, 0])) + offset_x
+                    center_y = int(np.mean(bbox_array[:, 1])) + offset_y
+                    
+                    # Calculate bounding box dimensions
+                    bbox_w = int(np.max(bbox_array[:, 0]) - np.min(bbox_array[:, 0]))
+                    bbox_h = int(np.max(bbox_array[:, 1]) - np.min(bbox_array[:, 1]))
+                    
+                    best_match = {
+                        'x': center_x - bbox_w // 2,
+                        'y': center_y - bbox_h // 2,
+                        'width': bbox_w,
+                        'height': bbox_h,
+                        'text': found_text,
+                        'confidence': confidence,
+                        'similarity': combined_score,
+                        'center_x': center_x,
+                        'center_y': center_y
+                    }
+                    best_score = combined_score
+        
+        return best_match
+    except Exception as e:
+        print(f"Text search error: {e}")
+        return None
+
+@app.route('/tracking_progress')
+def tracking_progress():
+    """Return current tracking progress"""
+    return jsonify(tracking_state)
+
+@app.route('/cancel_tracking', methods=['POST'])
+def cancel_tracking():
+    """Cancel ongoing tracking"""
+    global tracking_state
+    tracking_state['cancelled'] = True
+    tracking_state['message'] = 'Cancelling...'
+    return jsonify({'success': True})
+
 @app.route('/track_rectangle', methods=['POST'])
 def track_rectangle():
-    """Track an object forward through frames using template matching"""
+    """Track an object forward through frames using OCR + template matching hybrid approach"""
     try:
         data = request.get_json()
         video_name = data.get('video_name')
         rectangle = data.get('rectangle')  # {x, y, width, height, rectId}
         start_frame = data.get('start_frame')
         fps = data.get('fps', 30)
+        custom_frame_limit = data.get('frame_limit', 150)  # User-selected frame limit
         
         if not all([video_name, rectangle, start_frame is not None]):
             return jsonify({'error': 'Missing required parameters'}), 400
         
-        # Calculate frame limit (5 seconds worth)
-        frame_limit = min(fps * 5, 150)  # Cap at 150 frames for safety
+        # Handle frame limit
+        if custom_frame_limit == -1:
+            # User selected "All remaining frames"
+            frame_limit = 999999  # Very large number to process all frames
+        else:
+            frame_limit = min(custom_frame_limit, 900)  # Cap at 900 frames (30 seconds) for safety
+        
+        global tracking_state
+        
+        # Initialize tracking state
+        tracking_state.update({
+            'active': True,
+            'progress': 0,
+            'current_frame': 0,
+            'total_frames': frame_limit,
+            'stage': 'analyzing',
+            'method': '',
+            'keyframes_created': 0,
+            'message': 'Analyzing initial rectangle text...',
+            'cancelled': False
+        })
         
         print(f"Starting tracking for rectangle {rectangle['rectId']} from frame {start_frame}")
         print(f"Will process maximum {frame_limit} frames")
@@ -1572,6 +1911,23 @@ def track_rectangle():
         if template.size == 0:
             return jsonify({'error': 'Invalid rectangle coordinates'}), 400
         
+        # Extract text from the initial rectangle for OCR tracking
+        print("Extracting text from initial rectangle...")
+        target_texts = extract_text_from_region(start_img, x, y, w, h)
+        print(f"Found {len(target_texts)} text elements: {[t['text'] for t in target_texts]}")
+        
+        # Determine tracking method based on text availability
+        use_ocr_tracking = len(target_texts) > 0 and any(len(t['text'].strip()) > 2 for t in target_texts)
+        method_name = 'OCR + Template' if use_ocr_tracking else 'Template only'
+        print(f"Using {method_name} tracking")
+        
+        # Update progress
+        tracking_state.update({
+            'stage': 'tracking',
+            'method': method_name,
+            'message': f'Tracking using {method_name}...'
+        })
+        
         # Track forward
         tracking_results = []
         current_x, current_y = x, y
@@ -1593,13 +1949,34 @@ def track_rectangle():
         
         processed_frames = 0
         
+        # Update tracking state with actual total frames
+        actual_total_frames = min(frame_limit, len(frame_files) - start_index - 1)
+        tracking_state['total_frames'] = actual_total_frames
+        
         # Process subsequent frames
         for i in range(start_index + 1, min(start_index + 1 + frame_limit, len(frame_files))):
+            # Check for cancellation
+            if tracking_state['cancelled']:
+                print("Tracking cancelled by user")
+                tracking_state.update({
+                    'active': False,
+                    'stage': 'cancelled',
+                    'message': 'Tracking cancelled'
+                })
+                return jsonify({'error': 'Tracking cancelled by user'}), 400
             frame_file = frame_files[i]
             ffmpeg_frame_num = int(frame_file.split('_')[1].split('.')[0])
             # Convert FFmpeg frame number (1-based) to 0-based index for results
             frame_num = ffmpeg_frame_num - 1  
             frame_path = os.path.join(frame_folder, frame_file)
+            
+            # Update progress
+            progress_percent = int((processed_frames / actual_total_frames) * 100) if actual_total_frames > 0 else 0
+            tracking_state.update({
+                'current_frame': processed_frames + 1,
+                'progress': progress_percent,
+                'message': f'Processing frame {frame_num} ({processed_frames + 1}/{actual_total_frames})'
+            })
             
             # Load current frame
             current_img = cv2.imread(frame_path)
@@ -1607,51 +1984,169 @@ def track_rectangle():
                 print(f"Could not load frame {frame_num}, stopping tracking")
                 break
             
-            # Perform template matching
+            if use_ocr_tracking:
+                # Two-stage OCR tracking: scan rectangle first, then full frame if needed
+                print(f"Frame {frame_num}: Stage 1 - Scanning rectangle area ({current_x}, {current_y}, {w}, {h})")
+                
+                # Stage 1: Scan the inherited rectangle area (fast)
+                rectangle_texts = scan_rectangle_area(current_img, current_x, current_y, w, h, padding=15)
+                text_matches = find_matching_texts(rectangle_texts, target_texts)
+                
+                print(f"Frame {frame_num}: Stage 1 found {len(rectangle_texts)} texts, {len(text_matches)} matches")
+                
+                # Check if we found enough of our target texts
+                all_found = check_all_targets_found(text_matches, target_texts, coverage_threshold=0.8)
+                
+                if not all_found:
+                    print(f"Frame {frame_num}: Stage 2 - Scanning entire frame (fallback)")
+                    # Stage 2: Scan entire frame (slower fallback)
+                    frame_texts = find_all_text_in_frame(current_img)
+                    text_matches = find_matching_texts(frame_texts, target_texts)
+                    print(f"Frame {frame_num}: Stage 2 found {len(frame_texts)} texts, {len(text_matches)} matches")
+                else:
+                    print(f"Frame {frame_num}: Stage 1 sufficient - all target texts found")
+                
+                if text_matches:
+                    # Calculate the rectangle that covers all matched texts
+                    raw_covering_rect = calculate_covering_rectangle(text_matches)
+                    
+                    if raw_covering_rect:
+                        # Stabilize the rectangle position to prevent jitter and preserve size
+                        current_rect = {'x': current_x, 'y': current_y, 'width': w, 'height': h}
+                        # Only stabilize position, preserve original dimensions
+                        position_only_rect = {
+                            'x': raw_covering_rect['x'], 
+                            'y': raw_covering_rect['y'], 
+                            'width': w, 
+                            'height': h
+                        }
+                        covering_rect = stabilize_rectangle_position(position_only_rect, current_rect, stability_threshold=3)
+                        
+                        # Log stabilization if position was adjusted
+                        if (raw_covering_rect['x'] != covering_rect['x'] or 
+                            raw_covering_rect['y'] != covering_rect['y'] or
+                            raw_covering_rect['width'] != covering_rect['width'] or
+                            raw_covering_rect['height'] != covering_rect['height']):
+                            print(f"Frame {frame_num}: Stabilized position: {raw_covering_rect} → {covering_rect}")
+                        
+                        # Check if rectangle needs to be moved (after stabilization)
+                        # Use larger thresholds to prevent micro-movements from creating keyframes
+                        rect_moved = (abs(covering_rect['x'] - current_x) > 8 or 
+                                    abs(covering_rect['y'] - current_y) > 8)
+                        rect_resized = False  # Never resize during tracking
+                        
+                        # Update position only (preserve original size)
+                        current_x, current_y = covering_rect['x'], covering_rect['y']
+                        new_w, new_h = w, h  # Keep original dimensions
+                        
+                        # Calculate confidence based on number of matches and their similarities
+                        avg_similarity = sum(match['similarity'] for match in text_matches) / len(text_matches)
+                        match_ratio = len(text_matches) / len(target_texts)
+                        confidence = (avg_similarity * 0.7 + match_ratio * 30) / 100.0
+                        
+                        tracking_method = 'OCR_Enhanced_Stage1' if all_found else 'OCR_Enhanced_Stage2'
+                        matched_texts = [match['text'] for match in text_matches]
+                        
+                        print(f"Frame {frame_num}: OCR Enhanced found {len(text_matches)} texts {matched_texts}")
+                        print(f"Frame {frame_num}: Rectangle {'moved' if rect_moved else 'stable'} (size preserved)")
+                        print(f"Frame {frame_num}: New bounds ({current_x}, {current_y}, {new_w}, {new_h})")
+                        
+                        # Keep original dimensions (no resizing during tracking)
+                        
+                        # Add tracking result with movement/resize flags
+                        tracking_results.append({
+                            'frame': frame_num,
+                            'x': current_x,
+                            'y': current_y,
+                            'width': w,
+                            'height': h,
+                            'confidence': float(confidence),
+                            'method': tracking_method,
+                            'matched_texts': matched_texts,
+                            'text_count': len(text_matches),
+                            'rectangle_moved': rect_moved,
+                            'rectangle_resized': rect_resized,
+                            'avg_similarity': avg_similarity
+                        })
+                        
+                        processed_frames += 1
+                        continue
+                    else:
+                        print(f"Frame {frame_num}: Could not calculate covering rectangle")
+                else:
+                    print(f"Frame {frame_num}: No matching texts found")
+                
+                # If OCR tracking failed, fall back to template matching
+                print(f"Frame {frame_num}: Falling back to template matching...")
+            
+            # Perform template matching as backup or primary method
             result = cv2.matchTemplate(current_img, template, cv2.TM_CCOEFF_NORMED)
             _, max_val, _, max_loc = cv2.minMaxLoc(result)
             
-            # Set threshold for good match
-            threshold = 0.6
-            if max_val >= threshold:
-                # Update position
+            # Template matching threshold
+            template_threshold = 0.6
+            
+            if max_val >= template_threshold:
+                # Use template matching result
                 current_x, current_y = max_loc
-                
-                tracking_results.append({
-                    'frame': frame_num,
-                    'x': current_x,
-                    'y': current_y,
-                    'width': w,
-                    'height': h,
-                    'confidence': float(max_val)
-                })
-                
-                print(f"Frame {frame_num}: Found at ({current_x}, {current_y}) with confidence {max_val:.3f}")
-                
-                # Update template with new region for better tracking
-                if max_val > 0.8:  # Only update template if very confident
-                    template = current_img[current_y:current_y+h, current_x:current_x+w]
-                
+                confidence = max_val
+                tracking_method = 'Template'
+                print(f"Frame {frame_num}: Template found at ({current_x}, {current_y}) with confidence {max_val:.3f}")
             else:
-                print(f"Frame {frame_num}: Tracking lost (confidence {max_val:.3f} < {threshold})")
+                # Tracking lost
+                print(f"Frame {frame_num}: Tracking lost (template confidence {max_val:.3f} < {template_threshold})")
                 break
+            
+            # Add successful tracking result
+            tracking_results.append({
+                'frame': frame_num,
+                'x': current_x,
+                'y': current_y,
+                'width': w,
+                'height': h,
+                'confidence': float(confidence),
+                'method': tracking_method,
+                'text': ocr_match['text'] if ocr_match and tracking_method == 'OCR' else None
+            })
+            
+            # Update template with new region for better tracking (only for template method)
+            if tracking_method == 'Template' and confidence > 0.8:
+                template = current_img[current_y:current_y+h, current_x:current_x+w]
             
             processed_frames += 1
         
         print(f"Tracking completed. Processed {processed_frames} frames, found {len(tracking_results)} matches")
+        
+        # Update final tracking state
+        tracking_state.update({
+            'active': False,
+            'stage': 'completed',
+            'progress': 100,
+            'message': f'Completed! Processed {processed_frames} frames'
+        })
         
         return jsonify({
             'success': True,
             'rectangle_id': rectangle['rectId'],
             'start_frame': start_frame,
             'processed_frames': processed_frames,
-            'tracking_results': tracking_results
+            'tracking_results': tracking_results,
+            'tracking_method': 'OCR + Template' if use_ocr_tracking else 'Template only',
+            'text_elements': [t['text'] for t in target_texts] if target_texts else []
         })
         
     except Exception as e:
         print(f"Tracking error: {str(e)}")
         import traceback
         traceback.print_exc()
+        
+        # Update tracking state on error
+        tracking_state.update({
+            'active': False,
+            'stage': 'error',
+            'message': f'Error: {str(e)}'
+        })
+        
         return jsonify({'error': f'Tracking failed: {str(e)}'}), 500
 
 @app.route('/download_rectangles/<filename>')
